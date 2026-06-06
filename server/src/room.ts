@@ -103,9 +103,12 @@ export class Room {
     this.broadcastAll({ type: 'player_list', players: this.game.publicPlayers() })
     if (this.players.length >= 2) {
       this.clearExpiry()
-      // Lobby: auto-start as soon as the second player sits down
       if (!this.started && !this.tournamentId) {
+        // Lobby: auto-start as soon as the second player sits down
         setTimeout(() => this.startGame(), 300)
+      } else {
+        // Mid-game rejoin: start next hand if none is running
+        this.tryDealIfReady()
       }
     }
     return true
@@ -161,15 +164,14 @@ export class Room {
   handleRebuy(pid: string): void {
     this.cancelRebuyTimer(pid)
     const rp = this.players.find(p => p.id === pid)
-    if (!rp) {
-      // Player left the array during rebuy window — re-add them
-      return
-    }
+    if (!rp) return
     rp.sittingOut = false
     const gp = this.game.players.find(p => p.id === pid)
     if (gp) { gp.chips = this.startingChips; gp.status = 'waiting' }
     else     this.game.addPlayer(pid, rp.name, this.startingChips)
     this.broadcastAll({ type: 'player_list', players: this.game.publicPlayers() })
+    // If no hand is running and we now have enough players, start the next hand
+    this.tryDealIfReady()
   }
 
   handleRebuyDecline(pid: string): void {
@@ -329,6 +331,15 @@ export class Room {
   // ── Internal ──────────────────────────────────────────────────────────────
 
   private activePlayers() { return this.players.filter(p => !p.sittingOut) }
+
+  /** Start the next hand if the game is idle and ≥2 players are ready. */
+  private tryDealIfReady(): void {
+    if (!this.started) return
+    const phase = this.game.tableState.phase
+    if (phase !== 'waiting' && !this.game.isHandOver()) return
+    const eligible = this.players.filter(p => !p.sittingOut)
+    if (eligible.length >= 2) setTimeout(() => this.dealHand(), 1500)
+  }
 
   private sendTo(pid: string, msg: ServerMessage): void { this.players.find(p => p.id === pid)?.send(msg) }
 
