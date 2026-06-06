@@ -13,7 +13,7 @@ import { Room } from './room'
 import { Tournament } from './tournament'
 import { adminRouter, publicTournamentHandler } from './admin'
 
-const MAX_LOBBY_ROOMS = 30
+const MAX_LOBBY_ROOMS = Number(process.env.MAX_LOBBIES ?? 30)
 
 const rooms = new Map<string, Room>()
 let activeTournament: Tournament | null = null
@@ -227,7 +227,7 @@ const server = Bun.serve<Session>({
         // ── Create lobby room ───────────────────────────────────────────────
         case 'create_room': {
           if (lobbyRoomCount() >= MAX_LOBBY_ROOMS) {
-            emit({ type: 'room_error', message: 'Limite de 30 salas atingido.' }); break
+            emit({ type: 'room_error', message: `Limite de ${MAX_LOBBY_ROOMS} salas atingido.` }); break
           }
           const room = new Room(generateId(), msg.roomName.trim().slice(0, 40) || 'Mesa', session.name, msg.config, {
             onExpire: () => { rooms.delete(room.id); broadcastRoomList() },

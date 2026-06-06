@@ -12,7 +12,7 @@ export interface RoomOptions {
   onPlayerEliminated?: (playerId: string) => void
 }
 
-const EMPTY_TTL       = 5 * 60 * 1000
+const EMPTY_TTL       = 10 * 60 * 1000
 const REBUY_TIMEOUT_S = 60
 
 export class Room {
@@ -55,7 +55,7 @@ export class Room {
   private scheduleExpiry(): void {
     this.clearExpiry()
     this.expireTimer = setTimeout(() => {
-      if (this.players.length < 2 && !this.started) {
+      if (this.players.length < 2) {
         for (const p of this.players) p.send({ type: 'room_left', reason: 'expired' })
         this.onExpire?.()
       }
@@ -119,7 +119,7 @@ export class Room {
     this.players = this.players.filter(p => p.id !== playerId)
     this.game.removePlayer(playerId)
     this.broadcastAll({ type: 'player_list', players: this.game.publicPlayers() })
-    if (this.players.length < 2 && !this.started && !this.tournamentId) this.scheduleExpiry()
+    if (this.players.length < 2 && !this.tournamentId) this.scheduleExpiry()
   }
 
   // ── Start ─────────────────────────────────────────────────────────────────
