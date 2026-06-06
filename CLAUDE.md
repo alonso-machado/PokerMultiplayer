@@ -5,6 +5,21 @@ Alonso pode ler e auditar estas regras a qualquer momento.
 
 ---
 
+## 🚨 REGRA #2 — Mensagens de commit concisas
+
+- **1-2 linhas, máximo ~200 caracteres**
+- High-level: o QUE foi feito, não uma lista de arquivos
+- Prefixo convencional: `feat:` / `fix:` / `refactor:` / `docs:`
+- **Sem** `Co-Authored-By`, sem bullet points, sem parágrafos extras
+
+Exemplos corretos:
+```
+feat: pre-action buttons + blue turn indicator + reconnect your_turn fix
+fix: resolve showdown side pot distribution
+```
+
+---
+
 ## 🚨 REGRA #1 — Build e testes ANTES de qualquer commit
 
 **Esta regra não tem exceção. Nem para mudanças "pequenas".**
