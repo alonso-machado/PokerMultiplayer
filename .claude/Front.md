@@ -59,7 +59,8 @@ migrar para um reducer em App.
 
 **Roteamento:** sem React Router. A seleção de view é feita por estado (`view: 'lobby' | 'table' | 'tournament'`).
 
-**Deploy:** Vercel com `vercel.json` configurando fallback de SPA. Variáveis de
+**Deploy:** Vercel com `vercel.json` configurando fallback de SPA. O build usa
+`npm` (não Bun) porque o runner de build do Vercel é Node/npm. Variáveis de
 ambiente são injetadas no build pelo Vite como `import.meta.env.VITE_*`.
 
 ## Variáveis de Ambiente

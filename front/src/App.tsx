@@ -6,7 +6,7 @@ import type {
   TournamentInfo, TournamentPlayer, TournamentStatus,
 } from '../../shared/types'
 import { useSocket } from './hooks/useSocket'
-import { getOrCreateIdentity, saveName, saveTournamentToken, clearTournamentToken } from './hooks/usePlayerToken'
+import { getOrCreateIdentity, saveName, saveIdentityToken, saveTournamentToken, clearTournamentToken } from './hooks/usePlayerToken'
 import { Lobby } from './components/Lobby'
 import { TournamentTab } from './components/TournamentTab'
 import { PokerTable } from './components/PokerTable'
@@ -152,6 +152,12 @@ function App() {
           setRoomId(msg.roomId); setRoomName(msg.roomName ?? '')
           setRoomConfig(msg.config); setIsStarted(true)
         }
+        break
+
+      case 'identity':
+        // Server issued or re-issued a signed token — persist it for future connections.
+        saveIdentityToken(msg.token)
+        identity.playerId = msg.token
         break
     }
   }, [])

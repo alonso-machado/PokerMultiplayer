@@ -1,6 +1,7 @@
 {
-  "buildCommand": "cd front && bun install && bun run build",
+  "buildCommand": "npm install --prefix front && npm run build --prefix front",
   "outputDirectory": "front/dist",
+  "installCommand": "echo skip",
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
   ]

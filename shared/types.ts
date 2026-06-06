@@ -44,8 +44,6 @@ export interface TableState {
   communityCards: Card[]
 }
 
-export interface SidePot { amount: number; eligiblePlayerIds: string[] }
-
 // ─── Lobby ────────────────────────────────────────────────────────────────────
 
 export type RoomStatus = 'waiting' | 'playing'
@@ -178,6 +176,8 @@ export type ServerMessage =
   | { type: 'blind_update'; current: BlindLevel; next: BlindLevel | null; nextInSeconds: number | null }
   // ── Session ────────────────────────────────────────────────────────────────
   | { type: 'session_restored'; inTournament: boolean; roomId?: string; roomName?: string; config?: RoomConfig }
+  /** Sent to the client when a new identity is issued or a tampered token is rejected. */
+  | { type: 'identity'; token: string }
   // ── Generic ────────────────────────────────────────────────────────────────
   | { type: 'error'; message: string }
 

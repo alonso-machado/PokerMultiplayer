@@ -3,7 +3,12 @@
 import { startTelemetry, shutdownTelemetry } from './telemetry'
 startTelemetry()
 
-import type { ClientMessage, ServerMessage, RoomConfig } from '../../shared/types'
+import type { ClientMessage, ServerMessage } from '../../shared/types'
+import { parseClientMessage } from './validation'
+import { issueToken, verifyToken, newPlayerId } from './identity'
+import { openapiSpec, swaggerUiHtml } from './openapi'
+
+const IS_DEV = process.env.NODE_ENV !== 'production'
 import { Room } from './room'
 import { Tournament } from './tournament'
 import { adminRouter, publicTournamentHandler } from './admin'
@@ -122,6 +127,18 @@ const server = Bun.serve<Session>({
     if (pathname.startsWith('/api/admin/')) return handleAdmin(req, url)
     if (pathname === '/api/tournament')    return handlePublicTournament(req, url)
 
+    // ── Docs (dev only) ───────────────────────────────────────────────────────
+    if (IS_DEV) {
+      if (pathname === '/api/docs/openapi.json')
+        return new Response(JSON.stringify(openapiSpec, null, 2), {
+          headers: { 'Content-Type': 'application/json', ...cors() },
+        })
+      if (pathname === '/api/docs' || pathname === '/api/docs/')
+        return new Response(swaggerUiHtml('/api/docs/openapi.json'), {
+          headers: { 'Content-Type': 'text/html' },
+        })
+    }
+
     return jsonResp({ status: 'ok' })
   },
 
@@ -131,17 +148,21 @@ const server = Bun.serve<Session>({
       send(ws, { type: 'tournament_info', tournament: activeTournament?.info() ?? null })
     },
 
-    message(ws, raw) {
-      let msg: ClientMessage
-      try { msg = JSON.parse(String(raw)) as ClientMessage }
-      catch { send(ws, { type: 'error', message: 'Mensagem inválida.' }); return }
+    async message(ws, raw) {
+      const msg: ClientMessage | null = parseClientMessage(raw)
+      if (!msg) { send(ws, { type: 'error', message: 'Mensagem inválida.' }); return }
 
       const session = ws.data
       const emit    = (m: ServerMessage) => send(ws, m)
 
       // ── hello ────────────────────────────────────────────────────────────
       if (msg.type === 'hello') {
-        const pid = msg.playerId || generateId()
+        // Verify the signed token. If missing or tampered, issue a fresh identity.
+        let pid = msg.playerId ? await verifyToken(msg.playerId) : null
+        if (!pid) {
+          pid = newPlayerId()
+          emit({ type: 'identity', token: await issueToken(pid) })
+        }
         session.playerId        = pid
         session.name            = msg.name.trim().slice(0, 24) || 'Jogador'
         session.tournamentToken = msg.tournamentToken ?? null
@@ -208,8 +229,7 @@ const server = Bun.serve<Session>({
           if (lobbyRoomCount() >= MAX_LOBBY_ROOMS) {
             emit({ type: 'room_error', message: 'Limite de 30 salas atingido.' }); break
           }
-          const cfg  = sanitize(msg.config)
-          const room = new Room(generateId(), msg.roomName.trim().slice(0, 40) || 'Mesa', session.name, cfg, {
+          const room = new Room(generateId(), msg.roomName.trim().slice(0, 40) || 'Mesa', session.name, msg.config, {
             onExpire: () => { rooms.delete(room.id); broadcastRoomList() },
           })
           rooms.set(room.id, room)
@@ -248,6 +268,24 @@ const server = Bun.serve<Session>({
         case 'player_action': {
           const room = session.roomId ? rooms.get(session.roomId) : undefined
           room?.handleAction(session.playerId, msg.action, msg.amount)
+          break
+        }
+
+        // ── Rebuy (lobby-only) ──────────────────────────────────────────────
+        case 'rebuy': {
+          const room = session.roomId ? rooms.get(session.roomId) : undefined
+          if (room && !room.tournamentId) room.handleRebuy(session.playerId)
+          break
+        }
+
+        case 'rebuy_decline': {
+          const room = session.roomId ? rooms.get(session.roomId) : undefined
+          if (room && !room.tournamentId) {
+            room.handleRebuyDecline(session.playerId)
+            session.roomId = null
+            setPersistentRoom(session.playerId, null)
+            broadcastRoomList()
+          }
           break
         }
 
@@ -319,15 +357,6 @@ function setPersistentRoom(pid: string, roomId: string | null): void {
 function setPersistentToken(pid: string, token: string | null): void {
   const ps = playerSessions.get(pid)
   if (ps) ps.tournamentToken = token
-}
-
-function sanitize(c: RoomConfig): RoomConfig {
-  return {
-    smallBlind: Math.max(1, c.smallBlind | 0),
-    bigBlind:   Math.max(2, c.bigBlind | 0),
-    ante:       Math.max(0, c.ante | 0),
-    maxPlayers: Math.min(6, Math.max(2, c.maxPlayers | 0)),
-  }
 }
 
 function lobbyRoomList()  { return [...rooms.values()].filter(r => !r.tournamentId).map(r => r.summary()) }

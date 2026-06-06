@@ -1,6 +1,6 @@
 const PID_KEY  = 'pk_pid'
 const NAME_KEY = 'pk_name'
-const TOUR_KEY = 'pk_tid'   // tournament registration token
+const TOUR_KEY = 'pk_tid'
 const DAYS = 365
 
 function setCookie(name: string, value: string, days: number): void {
@@ -17,29 +17,27 @@ function delCookie(name: string): void {
   document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/`
 }
 
-function uuidv4(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-    const r = (Math.random() * 16) | 0
-    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16)
-  })
-}
-
 export interface PlayerIdentity {
-  playerId: string
+  playerId: string   // holds the full signed token issued by the server
   name: string
   tournamentToken: string | null
 }
 
-/** Returns existing identity or creates a new persistent one */
+/**
+ * Returns the stored identity.
+ * If no token cookie exists yet, sends an empty playerId so the server issues a fresh signed token.
+ * The server will respond with an `identity` message — call saveIdentityToken() to persist it.
+ */
 export function getOrCreateIdentity(fallbackName = 'Jogador'): PlayerIdentity {
-  let playerId = getCookie(PID_KEY)
-  if (!playerId) {
-    playerId = uuidv4()
-    setCookie(PID_KEY, playerId, DAYS)
-  }
-  const name = getCookie(NAME_KEY) ?? fallbackName
+  const playerId       = getCookie(PID_KEY) ?? ''
+  const name           = getCookie(NAME_KEY) ?? fallbackName
   const tournamentToken = getCookie(TOUR_KEY)
   return { playerId, name, tournamentToken }
+}
+
+/** Called when the server sends an `identity` message with a fresh signed token. */
+export function saveIdentityToken(token: string): void {
+  setCookie(PID_KEY, token, DAYS)
 }
 
 export function saveName(name: string): void {

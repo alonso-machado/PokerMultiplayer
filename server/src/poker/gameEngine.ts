@@ -187,6 +187,8 @@ export class PokerGame {
         player.status = 'all-in'
         break
       }
+      default:
+        return false
     }
 
     // Mark this player as having acted in the current street
