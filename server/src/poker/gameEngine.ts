@@ -448,7 +448,9 @@ export class PokerGame {
     if (toCall > 0 && p.chips >= toCall) actions.push('call')
     if (p.chips > toCall && !this._noReraiseIds.has(p.id)) actions.push('raise')
     if (p.chips > 0) actions.push('all-in')
-    return { actions, callAmount: toCall, minRaise: this._minRaise }
+    // Return total minimum raise amount (currentBet + increment) so the client
+    // can send it directly as the `amount` field without knowing currentBet separately.
+    return { actions, callAmount: toCall, minRaise: this._currentBet + this._minRaise }
   }
 
   isHandOver(): boolean {

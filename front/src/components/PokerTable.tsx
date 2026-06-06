@@ -122,13 +122,18 @@ export function PokerTable({
   // Clear pre-action when a new hand starts (new hole cards dealt)
   useEffect(() => { setPreAction(null) }, [myCards]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Reset raise slider to minimum whenever a new your_turn arrives with updated minRaise
+  useEffect(() => { setRaiseAmount(minRaise) }, [minRaise]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const startingChips = startingChipsFor(config)
   const currentPlayer = tableState ? players[tableState.currentPlayerIndex] : null
   const phase         = tableState?.phase ?? 'waiting'
   const pot           = tableState?.pot ?? 0
-  const effectiveMin  = Math.max(minRaise, config.bigBlind * 2)
   const myPlayer      = players.find(p => p.id === myId)
   const myChips       = myPlayer?.chips ?? 0
+  const myBet         = myPlayer?.bet   ?? 0
+  // minRaise from server is already the total minimum raise amount (currentBet + increment)
+  const effectiveMin  = Math.max(minRaise, config.bigBlind * 2)
 
   const timerPct  = (turnTimer / ACTION_TIMEOUT_S) * 100
   const timerColor = timerPct > 50 ? '#2ecc71' : timerPct > 25 ? '#f39c12' : '#e74c3c'
@@ -377,10 +382,10 @@ export function PokerTable({
             </div>
 
             {/* Raise slider — my turn only */}
-            {myTurn && validActions.includes('raise') && myChips > effectiveMin && (
+            {myTurn && validActions.includes('raise') && myChips > 0 && (
               <div className="raise-row">
                 <span>Raise:</span>
-                <input type="range" min={effectiveMin} max={myChips} step={config.bigBlind}
+                <input type="range" min={effectiveMin} max={myChips + myBet} step={config.bigBlind}
                   value={Math.max(raiseAmount, effectiveMin)}
                   onChange={e => setRaiseAmount(Number(e.target.value))} />
                 <span>{Math.max(raiseAmount, effectiveMin).toLocaleString()}</span>

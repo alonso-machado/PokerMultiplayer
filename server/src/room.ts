@@ -201,7 +201,16 @@ export class Room {
     const prevPhase        = this.game.tableState.phase
 
     const ok = this.game.applyAction(pid, action, amount)
-    if (!ok) { this.sendTo(pid, { type: 'error', message: 'Ação inválida.' }); return }
+    if (!ok) {
+      this.sendTo(pid, { type: 'error', message: 'Ação inválida.' })
+      // Re-send your_turn so the player's UI recovers if it cleared the action panel optimistically
+      const current = this.game.currentPlayer()
+      if (current?.id === pid) {
+        const { actions, callAmount, minRaise } = this.game.validActions(current)
+        this.sendTo(pid, { type: 'your_turn', validActions: actions, minRaise, callAmount })
+      }
+      return
+    }
 
     const newState  = this.game.tableState
     const newPhase  = newState.phase
