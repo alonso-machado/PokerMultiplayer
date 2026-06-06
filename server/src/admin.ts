@@ -1,4 +1,5 @@
 import type { RoomConfig } from '../../shared/types'
+import { usernameFilter } from './bloomFilter'
 
 const ADMIN_USER = process.env.ADMIN_USER ?? 'admin'
 const ADMIN_PASS = process.env.ADMIN_PASS ?? 'changeme'
@@ -88,6 +89,10 @@ export function adminRouter(
 
     if (path === '/api/admin/tournament' && method === 'DELETE') {
       return json(deleteTournament())
+    }
+
+    if (path === '/api/admin/bloomfilter' && method === 'GET') {
+      return json(usernameFilter.stats())
     }
 
     return json({ error: 'Not found.' }, 404)

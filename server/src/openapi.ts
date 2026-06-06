@@ -65,6 +65,19 @@ export const openapiSpec = {
           nextBlindInSeconds: { type: 'integer', nullable: true },
         },
       },
+      BloomFilterStats: {
+        type: 'object',
+        properties: {
+          epoch:             { type: 'string',  description: 'Deploy epoch — changes on every deploy to reset the namespace', example: 'abc123def' },
+          m:                 { type: 'integer', description: 'Total number of bits in the filter', example: 1440000 },
+          k:                 { type: 'integer', description: 'Number of hash functions', example: 10 },
+          bitsSet:           { type: 'integer', description: 'Number of bits currently set to 1', example: 4200 },
+          estimatedItems:    { type: 'integer', description: 'Estimated number of usernames registered this epoch', example: 420 },
+          falsePositiveRate: { type: 'number',  description: 'Current false-positive probability (0–1)', example: 0.000001 },
+          fillRatio:         { type: 'number',  description: 'Fraction of bits set (bitsSet / m)', example: 0.0029 },
+          bits:              { type: 'string',  description: 'Full 180 KB bit array encoded as base64 (1 bit per username slot)', example: 'AAAA...' },
+        },
+      },
       ErrorResponse: {
         type: 'object',
         properties: {
@@ -226,6 +239,34 @@ export const openapiSpec = {
         responses: {
           '200': { description: 'Deleted', content: { 'application/json': { schema: { $ref: '#/components/schemas/OkResponse' } } } },
           '400': { description: 'Tournament is already running', content: { 'application/json': { schema: { $ref: '#/components/schemas/OkResponse' } } } },
+          '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+        },
+      },
+    },
+
+    '/api/admin/bloomfilter': {
+      get: {
+        summary: 'Bloom filter diagnostics',
+        description: [
+          'Returns the full state of the username uniqueness bloom filter for the current deploy epoch.',
+          '',
+          '**bits** is a base64-encoded 180 KB `Uint8Array` (1,440,000 bits).',
+          'Decode it to inspect individual bit positions.',
+          '',
+          '`estimatedItems` uses the standard formula: `-(m/k) × ln(1 − fill)`.',
+          '`falsePositiveRate` ≈ `fill^k` — approaches 0.1% at capacity (100 k users).',
+        ].join('\n'),
+        tags: ['Admin'],
+        security: [{ bearerToken: [] }],
+        responses: {
+          '200': {
+            description: 'Bloom filter stats + raw bits',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/BloomFilterStats' },
+              },
+            },
+          },
           '401': { description: 'Unauthorized', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
         },
       },

@@ -75,6 +75,44 @@ class UsernameFilter {
       this.bits[pos >>> 3] |= 1 << (pos & 7)
     }
   }
+
+  /** Returns diagnostic stats and the full bit array encoded as base64. */
+  stats(): {
+    epoch: string
+    m: number
+    k: number
+    bitsSet: number
+    estimatedItems: number
+    falsePositiveRate: number
+    fillRatio: number
+    bits: string
+  } {
+    let bitsSet = 0
+    for (const byte of this.bits) {
+      // Hamming weight (popcount) per byte
+      let b = byte - ((byte >> 1) & 0x55)
+      b = (b & 0x33) + ((b >> 2) & 0x33)
+      bitsSet += (b + (b >> 4)) & 0x0f
+    }
+    const fillRatio = bitsSet / this.m
+    // n_est = -(m/k) × ln(1 − fill)
+    const estimatedItems = fillRatio < 1
+      ? Math.round(-(this.m / this.k) * Math.log(1 - fillRatio))
+      : Infinity as unknown as number
+    // FPR ≈ fill^k
+    const falsePositiveRate = Math.pow(fillRatio, this.k)
+
+    return {
+      epoch: EPOCH,
+      m: this.m,
+      k: this.k,
+      bitsSet,
+      estimatedItems,
+      falsePositiveRate,
+      fillRatio,
+      bits: Buffer.from(this.bits).toString('base64'),
+    }
+  }
 }
 
 export const usernameFilter = new UsernameFilter()
