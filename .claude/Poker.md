@@ -64,8 +64,19 @@ no pré-flop, último no pós-flop) — regra oficial do heads-up.
 ### Min Raise
 
 `minRaise = bigBlind × 2` no início de cada street. Após um raise, `minRaise` =
-diferença entre o novo `currentBet` e o anterior — respeitando o tamanho mínimo
-do raise anterior.
+diferença entre o novo `currentBet` e o anterior.
+
+**Regra TDA 2024:** um raise deve ser pelo menos do tamanho do maior raise anterior
+da mesma street. O servidor rejeita `raise` com `amount < currentBet + minRaise`.
+
+### Restrição de re-raise após all-in parcial
+
+| Situação | Reabre ação? | Efeito |
+|---|---|---|
+| All-in ≥ `minRaise` (full raise) | **Sim** — todos podem re-raise | `minRaise` atualiza, `noReraiseIds` limpo |
+| All-in < `minRaise` (partial raise) | **Não** — só quem ainda não agiu pode raise | `noReraiseIds` recebe quem já atuou |
+
+Jogadores em `noReraiseIds` veem apenas `fold`, `call` e `all-in` — sem `raise`.
 
 ---
 
@@ -95,7 +106,7 @@ automaticamente até o river, sem ação dos jogadores.
 1. Contendores = jogadores com status `'active'` ou `'all-in'`.
 2. Cada contendor tem sua melhor mão de 5 cartas avaliada a partir das 7
    disponíveis (2 hole + 5 comunitárias).
-3. Mãos são comparadas e o melhor vence o pot inteiro.
+3. Mãos são comparadas **por side pot** (ver seção Side Pots abaixo).
 4. Se apenas 1 contendor (todos os outros foldaram), ele vence sem mostrar cartas.
 
 ### Ranking de Mãos (maior para menor)
@@ -125,12 +136,67 @@ automaticamente até o river, sem ação dos jogadores.
 
 ---
 
-## Side Pots
+## All-In e Partial Raise
 
-O tipo `SidePot` existe em `shared/types.ts`, mas a implementação atual distribui
-o pot inteiro ao vencedor (`resolveShowdown` não implementa side pots múltiplos).
-Em cenários com múltiplos all-ins de valores diferentes, o pot é dado ao melhor
-contendor sem divisão proporcional — comportamento simplificado intencional.
+Quando um jogador vai all-in:
+
+- **Full raise** (all-in ≥ `minRaise` acima do `currentBet`): a aposta sobe, `minRaise`
+  atualiza, e a ação é **reaberta** para todos — qualquer jogador pode re-raise.
+- **Partial raise** (all-in < `minRaise`): `currentBet` sobe mas `minRaise` não muda.
+  Jogadores que **já agiram** nesta street só podem `call` ou `fold` — **não podem
+  re-raise**. Jogadores que ainda não agiram podem `call`, `raise` ou `fold` normalmente.
+
+Enquanto houver um jogador `active` com `bet < currentBet`, ele deve agir antes de
+avançar a fase — mesmo que todos os outros estejam all-in.
+
+## Side Pots (TDA Rule 50)
+
+Quando um jogador vai all-in por um valor menor do que outro, cria-se um ou mais
+side pots. `resolveShowdown` implementa isso corretamente via `buildSidePots()`.
+
+### Algoritmo de construção de pots
+
+1. Coletam-se os valores únicos de `totalBet` de todos os jogadores **não foldados**,
+   ordenados de forma crescente. Cada valor é um "nível de pot".
+2. Para cada nível, a contribuição de **todos** os jogadores (inclusive foldados) é
+   `min(totalBet, nivel) − min(totalBet, nivelAnterior)`.
+   Jogadores foldados contribuem com **dead money** — aumentam o pot mas **não são
+   elegíveis** para ganhar.
+3. Apenas jogadores **não foldados** cujo `totalBet >= nivel` são elegíveis para aquele
+   pot. Um jogador all-in não é elegível para pots acima do seu totalBet.
+
+### Exemplo (cenário de teste `sidepot.test.ts`)
+
+| Jogador | totalBet | Status |
+|---|---|---|
+| P1 | 1050 | all-in |
+| P2 | 850  | all-in |
+| P3 | 1050 | active |
+| P4 | 50   | folded |
+
+| Pot | Valor | Elegíveis |
+|---|---|---|
+| Main pot (nível 850) | 2600 | P1, P2, P3 |
+| Side pot (nível 1050) | 400 | P1, P3 |
+
+**Se P2 ganhar o main pot:** P2 recebe 2600. P1 e P3 disputam por showdown o side pot
+de 400 — o de melhor mão ganha os 400 (TDA Rule 57: Cards Speak). Só ocorre divisão
+igual se as duas mãos forem exatamente empatadas (mesmo rank + mesmo kicker).
+
+### Empate (split pot)
+
+Quando dois ou mais jogadores elegíveis empatam exatamente, o pot é dividido em partes
+iguais. Se o pot não for divisível pelo número de vencedores, o chip restante vai ao
+primeiro vencedor por ordem de `seatIndex` (determinístico).
+
+### Interface `HandResult`
+
+```
+HandResult.pots    — array de PotResult, um por side pot, ordem main → side
+HandResult.winnerId — vencedor do maior pot (main pot)
+HandResult.amount  — total de chips que o winnerId ganhou em todos os pots
+ShowdownResult.won — total ganho pelo jogador em todos os pots combinados
+```
 
 ---
 

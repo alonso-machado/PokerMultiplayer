@@ -184,7 +184,8 @@ export type ServerMessage =
 export interface ShowdownResult {
   playerId: string
   playerName: string
-  cards: Card[]
+  cards: Card[]       // hole cards (2)
+  bestCards: Card[]   // best 5-card combination used
   handName: string
   won: number
 }

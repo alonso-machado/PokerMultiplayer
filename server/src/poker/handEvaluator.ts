@@ -5,11 +5,12 @@ export interface HandResult {
   rank: number       // higher = better (1=high card … 9=royal flush)
   tiebreakers: number[]
   name: string
+  bestCards: Card[]
 }
 
 export function evaluateHand(cards: Card[]): HandResult {
   const best = bestFiveFrom(cards)
-  return scoreHand(best)
+  return { ...scoreHand(best), bestCards: best }
 }
 
 // pick best 5 from up to 7 cards

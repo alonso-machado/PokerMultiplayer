@@ -220,14 +220,21 @@ export function PokerTable({
                     {handResult.handName ? ` com ${handResult.handName}` : ''}
                   </p>
                 )}
-                {showdown.map(r => (
-                  <div key={r.playerId} className={`showdown-result${r.won > 0 ? ' winner' : ''}`}>
-                    <span>{r.playerName}: <em>{r.handName}</em></span>
-                    <div className="showdown-cards">
-                      {r.cards.map((c, i) => <PlayingCard key={i} card={c} width={40} />)}
+                {showdown.map(r => {
+                  const holeKeys = new Set(r.cards.map(c => `${c.rank}${c.suit}`))
+                  return (
+                    <div key={r.playerId} className={`showdown-result${r.won > 0 ? ' winner' : ''}`}>
+                      <span>{r.playerName}: <em>{r.handName}</em></span>
+                      <div className="showdown-cards">
+                        {r.bestCards.map((c, i) => (
+                          <div key={i} className={`showdown-card-wrap${holeKeys.has(`${c.rank}${c.suit}`) ? ' hole-card' : ''}`}>
+                            <PlayingCard card={c} width={40} />
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}

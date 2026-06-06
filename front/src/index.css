@@ -206,6 +206,9 @@ input:focus { border-color: var(--gold); }
 .showdown-result.winner { color: var(--gold-light); font-weight: 700; }
 .showdown-result em { font-style: normal; color: var(--text-muted); }
 .showdown-cards { display: flex; gap: 4px; justify-content: center; margin-top: 5px; }
+.showdown-card-wrap { position: relative; }
+.showdown-card-wrap.hole-card { filter: drop-shadow(0 0 5px #facc15); transform: translateY(-4px); }
+.showdown-card-wrap.hole-card::after { content: '★'; position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%); font-size: 9px; color: #facc15; }
 
 /* ── Rebuy ──────────────────────────────────────────────────────────────── */
 .rebuy-box { border-color: #c0392b; }

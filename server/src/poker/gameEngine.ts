@@ -7,12 +7,23 @@ export interface GamePlayer extends Player {
   holeCards: Card[]
 }
 
-export interface HandResult {
+export interface PotResult {
   winnerId: string
   winnerName: string
   amount: number
   handName?: string
-  showdown: { playerId: string; playerName: string; cards: Card[]; handName: string; won: number }[]
+}
+
+export interface HandResult {
+  /** Primary winner (largest pot, or sole winner). */
+  winnerId: string
+  winnerName: string
+  /** Total chips awarded to the primary winner across all pots they won. */
+  amount: number
+  handName?: string
+  showdown: { playerId: string; playerName: string; cards: Card[]; bestCards: Card[]; handName: string; won: number }[]
+  /** One entry per side pot, ordered main → side. */
+  pots: PotResult[]
 }
 
 export class PokerGame {
@@ -32,6 +43,8 @@ export class PokerGame {
    * Without this, check rounds end immediately because currentBet=0 matches all bets.
    */
   private _actedThisStreet = new Set<string>()
+  // Players who may not re-raise because a partial all-in (< minRaise) occurred after they acted
+  private _noReraiseIds = new Set<string>()
 
   constructor(private config: RoomConfig) {
     this._minRaise = config.bigBlind * 2
@@ -85,6 +98,7 @@ export class PokerGame {
     this._minRaise = this.config.bigBlind * 2
     this._phase = 'preflop'
     this._actedThisStreet.clear()
+    this._noReraiseIds.clear()
 
     // Reset player states BEFORE filtering active players —
     // 'waiting' players (joined mid-game) become 'active' here.
@@ -172,18 +186,32 @@ export class PokerGame {
         break
       }
       case 'raise': {
+        if (this._noReraiseIds.has(player.id)) return false
         const raiseTotal = Math.min(amount, player.chips + player.bet)
+        if (raiseTotal < this._currentBet + this._minRaise) return false
         const added = raiseTotal - player.bet
         player.chips -= added; player.totalBet += added; this._pot += added
         this._minRaise = raiseTotal - this._currentBet
         this._currentBet = raiseTotal; player.bet = raiseTotal
         if (player.chips === 0) player.status = 'all-in'
+        this._noReraiseIds.clear()
         break
       }
       case 'all-in': {
         const all = player.chips
         player.bet += all; player.totalBet += all; this._pot += all; player.chips = 0
-        if (player.bet > this._currentBet) { this._minRaise = player.bet - this._currentBet; this._currentBet = player.bet }
+        if (player.bet > this._currentBet) {
+          const raiseBy = player.bet - this._currentBet
+          if (raiseBy >= this._minRaise) {
+            // Full raise: update minRaise and reopen action for everyone
+            this._minRaise = raiseBy
+            this._noReraiseIds.clear()
+          } else {
+            // Partial raise (short stack): players who already acted may only call, not re-raise
+            for (const id of this._actedThisStreet) this._noReraiseIds.add(id)
+          }
+          this._currentBet = player.bet
+        }
         player.status = 'all-in'
         break
       }
@@ -208,8 +236,8 @@ export class PokerGame {
       return
     }
 
-    if (canAct.length <= 1) {
-      // Only all-in players remain — deal out remaining community cards
+    if (canAct.length === 0) {
+      // All remaining players are all-in — deal out remaining community cards
       this.advancePhase()
       return
     }
@@ -237,7 +265,8 @@ export class PokerGame {
   advancePhase(): Card[] {
     for (const p of this.players) p.bet = 0
     this._currentBet = 0; this._minRaise = this.config.bigBlind * 2
-    this._actedThisStreet.clear()   // new street — everyone must act again
+    this._actedThisStreet.clear()
+    this._noReraiseIds.clear()
 
     const phases: GamePhase[] = ['preflop', 'flop', 'turn', 'river', 'showdown']
     const idx = phases.indexOf(this._phase)
@@ -280,35 +309,123 @@ export class PokerGame {
 
   // ── Showdown ──────────────────────────────────────────────────────────────
 
+  /**
+   * Builds side pots from each player's totalBet (TDA Rule 50).
+   *
+   * Algorithm:
+   *   1. Collect the unique totalBet levels of all non-folded players (sorted ASC).
+   *   2. For each level, every player (including folded) contributes
+   *      min(totalBet, level) − min(totalBet, prevLevel) to the pot.
+   *   3. Only non-folded players whose totalBet >= level are eligible to win that pot.
+   *
+   * Example — P1(1050 all-in), P2(850 all-in), P3(1050 active), P4(50 folded):
+   *   Level 850: amount=2600  eligible=[P1,P2,P3]
+   *   Level 1050: amount=400  eligible=[P1,P3]
+   */
+  private buildSidePots(): { amount: number; eligible: GamePlayer[] }[] {
+    const nonFolded = this.players.filter(p => p.status !== 'folded' && p.totalBet > 0)
+    const levels = [...new Set(nonFolded.map(p => p.totalBet))].sort((a, b) => a - b)
+
+    const pots: { amount: number; eligible: GamePlayer[] }[] = []
+    let prev = 0
+
+    for (const level of levels) {
+      let amount = 0
+      for (const p of this.players) {
+        amount += Math.min(p.totalBet, level) - Math.min(p.totalBet, prev)
+      }
+      const eligible = nonFolded.filter(p => p.totalBet >= level)
+      if (amount > 0) pots.push({ amount, eligible })
+      prev = level
+    }
+
+    return pots
+  }
+
   resolveShowdown(): HandResult {
     const contenders = this.players.filter(p => p.status === 'active' || p.status === 'all-in')
 
+    // Single contender: everyone else folded — wins without showing cards
     if (contenders.length === 1) {
       const winner = contenders[0]!
-      winner.chips += this._pot
-      return { winnerId: winner.id, winnerName: winner.name, amount: this._pot, showdown: [] }
+      const amount = this._pot
+      winner.chips += amount
+      this._pot = 0
+      return {
+        winnerId: winner.id, winnerName: winner.name,
+        amount, showdown: [], pots: [{ winnerId: winner.id, winnerName: winner.name, amount }],
+      }
     }
 
-    const evaluated = contenders.map(p => ({
-      player: p,
-      result: evaluateHand([...p.holeCards, ...this._communityCards]),
-    }))
-    evaluated.sort((a, b) => compareHands(b.result, a.result))
-    const winner = evaluated[0]!
-    winner.player.chips += this._pot
+    // Evaluate every contender's best hand once
+    const evalMap = new Map(
+      contenders.map(p => [
+        p.id,
+        { player: p, result: evaluateHand([...p.holeCards, ...this._communityCards]) },
+      ])
+    )
 
-    return {
-      winnerId:   winner.player.id,
-      winnerName: winner.player.name,
-      amount:     this._pot,
-      handName:   winner.result.name,
-      showdown: evaluated.map(e => ({
+    // Track net winnings per player (for showdown display)
+    const wonMap = new Map<string, number>(contenders.map(p => [p.id, 0]))
+
+    const pots = this.buildSidePots()
+    const potResults: PotResult[] = []
+
+    for (const pot of pots) {
+      // Rank eligible contenders for this pot
+      const ranked = pot.eligible
+        .map(p => evalMap.get(p.id)!)
+        .sort((a, b) => compareHands(b.result, a.result))
+
+      if (ranked.length === 0) continue
+
+      // All players tied with the best hand share this pot
+      const best = ranked[0]!
+      const winners = ranked.filter(e => compareHands(e.result, best.result) === 0)
+
+      const share = Math.floor(pot.amount / winners.length)
+      // Odd chip goes to the first winner (lowest seat index, deterministic)
+      const remainder = pot.amount - share * winners.length
+
+      for (let i = 0; i < winners.length; i++) {
+        const gain = share + (i === 0 ? remainder : 0)
+        winners[i]!.player.chips += gain
+        wonMap.set(winners[i]!.player.id, (wonMap.get(winners[i]!.player.id) ?? 0) + gain)
+      }
+
+      potResults.push({
+        winnerId:  winners[0]!.player.id,
+        winnerName: winners[0]!.player.name,
+        amount:    pot.amount,
+        handName:  best.result.name,
+      })
+    }
+
+    this._pot = 0
+
+    // Primary result = the pot with the most chips (main pot)
+    const primary = [...potResults].sort((a, b) => b.amount - a.amount)[0]
+      ?? potResults[0]!
+
+    // Build showdown detail ordered by hand strength (best first)
+    const showdown = [...evalMap.values()]
+      .sort((a, b) => compareHands(b.result, a.result))
+      .map(e => ({
         playerId:   e.player.id,
         playerName: e.player.name,
         cards:      e.player.holeCards,
+        bestCards:  e.result.bestCards,
         handName:   e.result.name,
-        won:        e.player.id === winner.player.id ? this._pot : 0,
-      })),
+        won:        wonMap.get(e.player.id) ?? 0,
+      }))
+
+    return {
+      winnerId:   primary.winnerId,
+      winnerName: primary.winnerName,
+      amount:     wonMap.get(primary.winnerId) ?? primary.amount,
+      handName:   primary.handName,
+      showdown,
+      pots: potResults,
     }
   }
 
@@ -329,7 +446,7 @@ export class PokerGame {
     const toCall = this._currentBet - p.bet
     if (toCall === 0) actions.push('check')
     if (toCall > 0 && p.chips >= toCall) actions.push('call')
-    if (p.chips > toCall) actions.push('raise')
+    if (p.chips > toCall && !this._noReraiseIds.has(p.id)) actions.push('raise')
     if (p.chips > 0) actions.push('all-in')
     return { actions, callAmount: toCall, minRaise: this._minRaise }
   }
