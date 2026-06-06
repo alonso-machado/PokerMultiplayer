@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: poker-server
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: BLOOM_EPOCH
+        value: $RENDER_GIT_COMMIT

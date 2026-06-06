@@ -1,0 +1,10 @@
+front/
+server/node_modules/
+server/test/
+server/.env
+*.md
+.git/
+.gitignore
+railway.toml
+railway.json
+vercel.json
