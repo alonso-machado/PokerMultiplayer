@@ -303,6 +303,12 @@ export class Room {
       send({ type: 'hand_dealt', yourCards: gp.holeCards, players: this.game.publicPlayers(), tableState: this.game.tableState })
     }
     send({ type: 'player_list', players: this.game.publicPlayers() })
+    // Re-send your_turn if it's this player's turn (they may have missed it while disconnected)
+    const current = this.game.currentPlayer()
+    if (current?.id === pid) {
+      const { actions, callAmount, minRaise } = this.game.validActions(current)
+      send({ type: 'your_turn', validActions: actions, minRaise, callAmount })
+    }
   }
 
   // ── Tournament helpers ────────────────────────────────────────────────────

@@ -86,9 +86,10 @@ function App() {
 
       case 'community_cards':
         // tableState.communityCards already contains the full accumulated list
+        // Note: do NOT clear turn here — player_acted already cleared it, and
+        // your_turn arrives after this message for whoever acts first on the new street.
         setTableState(msg.tableState)
         setPlayers(msg.players)
-        setTurn(null)
         break
 
       case 'your_turn':

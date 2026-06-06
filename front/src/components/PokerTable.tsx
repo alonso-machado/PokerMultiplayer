@@ -62,6 +62,7 @@ export function PokerTable({
   const [rebuyCountdown, setRebuyCountdown] = useState(60)
   const [turnTimer,      setTurnTimer]      = useState(ACTION_TIMEOUT_S)
   const [redFlash,       setRedFlash]       = useState(false)
+  const [preAction,      setPreAction]      = useState<'fold' | 'check' | 'all-in' | null>(null)
   const autoFoldedRef = useRef(false)
 
   // ── Rebuy countdown ──────────────────────────────────────────────────────
@@ -105,6 +106,21 @@ export function PokerTable({
     }, 1000)
     return () => clearInterval(id)
   }, [myTurn]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Pre-action: fire queued action as soon as it becomes my turn ─────────
+  useEffect(() => {
+    if (!myTurn || !preAction) return
+    if (validActions.includes(preAction)) {
+      setPreAction(null)
+      onAction(preAction)
+    } else {
+      // Queued action no longer valid (e.g. check pre-selected but someone raised)
+      setPreAction(null)
+    }
+  }, [myTurn]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Clear pre-action when a new hand starts (new hole cards dealt)
+  useEffect(() => { setPreAction(null) }, [myCards]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const startingChips = startingChipsFor(config)
   const currentPlayer = tableState ? players[tableState.currentPlayerIndex] : null
@@ -263,20 +279,15 @@ export function PokerTable({
       {/* ── Action bar ─────────────────────────────────────────────────────── */}
       <div className="action-bar">
 
-        {/* Timer bar — separator between felt and actions, visible only on my turn */}
+        {/* Timer bar — visible only on my turn */}
         {isStarted && myTurn && !isAway && (
           <div className="turn-timer-bar">
-            <div
-              className="turn-timer-fill"
-              style={{ width: `${timerPct}%`, background: timerColor }}
-            />
-            <span className="turn-timer-count" style={{ color: timerColor }}>
-              {turnTimer}s
-            </span>
+            <div className="turn-timer-fill" style={{ width: `${timerPct}%`, background: timerColor }} />
+            <span className="turn-timer-count" style={{ color: timerColor }}>{turnTimer}s</span>
           </div>
         )}
 
-        {/* ── My cards row (always bottom of action bar when in hand) ───── */}
+        {/* My cards row */}
         {(myCards.length > 0 || isAway) && (
           <div className="my-cards-row">
             {isAway ? (
@@ -285,11 +296,9 @@ export function PokerTable({
                 <button className="btn-back" onClick={onSetBack}>Voltar à mesa</button>
               </>
             ) : (
-              <>
-                <div className="my-cards-hand">
-                  {myCards.map((c, i) => <PlayingCard key={i} card={c} width={72} />)}
-                </div>
-              </>
+              <div className="my-cards-hand">
+                {myCards.map((c, i) => <PlayingCard key={i} card={c} width={72} />)}
+              </div>
             )}
           </div>
         )}
@@ -298,53 +307,95 @@ export function PokerTable({
         {!isTournament && !isStarted && (
           <div className="action-btns">
             <span className="status-msg">
-              {players.length < 2
-                ? `Aguardando outro jogador… (${players.length}/2)`
-                : 'Iniciando…'}
+              {players.length < 2 ? `Aguardando outro jogador… (${players.length}/2)` : 'Iniciando…'}
             </span>
           </div>
         )}
 
-        {/* Waiting for another player's turn */}
-        {isStarted && !myTurn && !isAway && !rebuyPrompt && (
-          <div className="action-btns-row">
-            <span className="status-msg">
-              {currentPlayer ? `Vez de ${currentPlayer.name}…` : 'Aguardando próxima mão…'}
-            </span>
-            {isTournament && myChips > 0 && (
-              <button className="btn-away" onClick={onSetAway}>⏸ Levantar</button>
-            )}
-          </div>
-        )}
-
-        {/* Action buttons — my turn */}
-        {isStarted && myTurn && !isAway && (
+        {/* ── Action panel — always visible when in hand ──────────────────
+            On my turn   : real actions (Fold/Check/Call/Raise/All-in)
+            Off my turn  : Fold/Check/All-in as pre-actions (queued, auto-fire on turn)
+                           Call and Raise are too context-dependent to pre-queue.       */}
+        {isStarted && !isAway && myCards.length > 0 && !rebuyPrompt && (
           <>
             <div className="action-btns">
-              {validActions.includes('fold')   && <button className="btn-fold"  onClick={() => onAction('fold')}>Fold</button>}
-              {validActions.includes('check')  && <button className="btn-check" onClick={() => onAction('check')}>Check</button>}
-              {validActions.includes('call')   && (
+
+              {/* Fold — always available; pre-action when not my turn */}
+              <button
+                className={`btn-fold${!myTurn && preAction === 'fold' ? ' pre-selected' : ''}`}
+                onClick={() => {
+                  if (myTurn) { onAction('fold') }
+                  else { setPreAction(p => p === 'fold' ? null : 'fold') }
+                }}
+              >
+                Fold{!myTurn && preAction === 'fold' ? ' ✓' : ''}
+              </button>
+
+              {/* Check — pre-action when not my turn; hidden on my turn if not valid */}
+              {(!myTurn || validActions.includes('check')) && (
+                <button
+                  className={`btn-check${!myTurn && preAction === 'check' ? ' pre-selected' : ''}`}
+                  onClick={() => {
+                    if (myTurn) { onAction('check') }
+                    else { setPreAction(p => p === 'check' ? null : 'check') }
+                  }}
+                >
+                  Check{!myTurn && preAction === 'check' ? ' ✓' : ''}
+                </button>
+              )}
+
+              {/* Call — real action only, shown on my turn */}
+              {myTurn && validActions.includes('call') && (
                 <button className="btn-call" onClick={() => onAction('call')}>
                   Call{callAmount > 0 ? ` ${callAmount.toLocaleString()}` : ''}
                 </button>
               )}
-              {validActions.includes('raise')  && (
+
+              {/* Raise — real action only, shown on my turn */}
+              {myTurn && validActions.includes('raise') && (
                 <button className="btn-raise" onClick={() => onAction('raise', Math.max(raiseAmount, effectiveMin))}>
                   Raise {Math.max(raiseAmount, effectiveMin).toLocaleString()}
                 </button>
               )}
-              {validActions.includes('all-in') && <button className="btn-allin" onClick={() => onAction('all-in')}>All-in</button>}
-              {isTournament && (
+
+              {/* All-in — always available; pre-action when not my turn */}
+              {(myTurn ? validActions.includes('all-in') : myChips > 0) && (
+                <button
+                  className={`btn-allin${!myTurn && preAction === 'all-in' ? ' pre-selected' : ''}`}
+                  onClick={() => {
+                    if (myTurn) { onAction('all-in') }
+                    else { setPreAction(p => p === 'all-in' ? null : 'all-in') }
+                  }}
+                >
+                  All-in{!myTurn && preAction === 'all-in' ? ' ✓' : ''}
+                </button>
+              )}
+
+              {isTournament && myTurn && (
                 <button className="btn-away" onClick={onSetAway}>⏸ Levantar</button>
               )}
             </div>
-            {validActions.includes('raise') && myChips > effectiveMin && (
+
+            {/* Raise slider — my turn only */}
+            {myTurn && validActions.includes('raise') && myChips > effectiveMin && (
               <div className="raise-row">
                 <span>Raise:</span>
                 <input type="range" min={effectiveMin} max={myChips} step={config.bigBlind}
                   value={Math.max(raiseAmount, effectiveMin)}
                   onChange={e => setRaiseAmount(Number(e.target.value))} />
                 <span>{Math.max(raiseAmount, effectiveMin).toLocaleString()}</span>
+              </div>
+            )}
+
+            {/* Status line below buttons */}
+            {!myTurn && (
+              <div className="action-btns-row">
+                <span className="status-msg">
+                  {currentPlayer ? `Vez de ${currentPlayer.name}…` : 'Aguardando próxima mão…'}
+                </span>
+                {isTournament && myChips > 0 && (
+                  <button className="btn-away" onClick={onSetAway}>⏸ Levantar</button>
+                )}
               </div>
             )}
           </>
