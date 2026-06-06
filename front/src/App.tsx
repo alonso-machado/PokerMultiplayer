@@ -14,7 +14,7 @@ import { HandGuide } from './components/HandGuide'
 import { AdminPage } from './pages/AdminPage'
 
 interface TurnState { validActions: PlayerAction[]; callAmount: number; minRaise: number }
-interface ShowdownEntry { playerId: string; playerName: string; cards: Card[]; handName: string; won: number }
+interface ShowdownEntry { playerId: string; playerName: string; cards: Card[]; bestCards: Card[]; handName: string; won: number }
 type Tab = 'rooms' | 'tournament'
 
 const identity = getOrCreateIdentity()

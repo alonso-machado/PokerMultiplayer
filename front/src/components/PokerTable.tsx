@@ -37,7 +37,7 @@ interface Props {
   onSetBack: () => void
 }
 
-interface ShowdownEntry { playerId: string; playerName: string; cards: Card[]; handName: string; won: number }
+interface ShowdownEntry { playerId: string; playerName: string; cards: Card[]; bestCards: Card[]; handName: string; won: number }
 
 // Seat positions — 0 is the local player (bottom-center, slightly higher to leave room for cards)
 const SEAT_POSITIONS = [
