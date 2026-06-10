@@ -42,19 +42,20 @@ function scoreHand(cards: Card[]): HandResult {
   const values = cards.map(c => rankValue(c.rank)).sort((a, b) => b - a)
   const suits = cards.map(c => c.suit)
   const isFlush = suits.every(s => s === suits[0])
-  const isStraight = checkStraight(values)
+  const strHigh = straightHighCard(values)
+  const isStraight = strHigh !== null
   const counts = countValues(values)
 
   if (isFlush && isStraight) {
-    const high = Math.max(...values)
-    return high === 14
+    // Royal Flush: A-K-Q-J-10 of same suit (high=14, NOT a wheel)
+    return strHigh === 14
       ? { rank: 9, tiebreakers: [14], name: 'Royal Flush' }
-      : { rank: 8, tiebreakers: [high], name: 'Straight Flush' }
+      : { rank: 8, tiebreakers: [strHigh], name: 'Straight Flush' }
   }
   if (counts[0]![0] === 4) return { rank: 7, tiebreakers: sortedCounts(counts), name: 'Four of a Kind' }
   if (counts[0]![0] === 3 && counts[1]![0] === 2) return { rank: 6, tiebreakers: sortedCounts(counts), name: 'Full House' }
   if (isFlush) return { rank: 5, tiebreakers: values, name: 'Flush' }
-  if (isStraight) return { rank: 4, tiebreakers: [Math.max(...values)], name: 'Straight' }
+  if (isStraight) return { rank: 4, tiebreakers: [strHigh], name: 'Straight' }
   if (counts[0]![0] === 3) return { rank: 3, tiebreakers: sortedCounts(counts), name: 'Three of a Kind' }
   if (counts[0]![0] === 2 && counts[1]![0] === 2) return { rank: 2, tiebreakers: sortedCounts(counts), name: 'Two Pair' }
   if (counts[0]![0] === 2) return { rank: 1, tiebreakers: sortedCounts(counts), name: 'Pair' }
@@ -73,17 +74,21 @@ function sortedCounts(counts: [number, number][]): number[] {
   return counts.map(([, val]) => val)
 }
 
-function checkStraight(values: number[]): boolean {
+/**
+ * Returns the effective high card of the best straight in `values`, or null.
+ * For the wheel (A-2-3-4-5) the Ace acts as 1, so the high card is 5 — not 14.
+ * This matters for both tiebreaking and royal-flush detection.
+ */
+function straightHighCard(values: number[]): number | null {
   const unique = [...new Set(values)].sort((a, b) => b - a)
-  if (unique.length < 5) return false
-  // normal straight
-  if (unique[0]! - unique[4]! === 4) return true
-  // wheel: A-2-3-4-5
+  if (unique.length < 5) return null
+  if (unique[0]! - unique[4]! === 4) return unique[0]!
+  // wheel: A-2-3-4-5 → effective high = 5
   if (unique[0] === 14) {
     const low = unique.slice(1)
-    return low[0]! - low[3]! === 3 && low[3] === 2
+    if (low.length >= 4 && low[0]! - low[3]! === 3 && low[3] === 2) return 5
   }
-  return false
+  return null
 }
 
 export function compareHands(a: HandResult, b: HandResult): number {

@@ -237,8 +237,8 @@ export class PokerGame {
     }
 
     if (canAct.length === 0) {
-      // All remaining players are all-in — deal out remaining community cards
-      this.advancePhase()
+      // All remaining players are all-in — run out ALL remaining community cards at once
+      while (this._phase !== 'showdown') this.advancePhase()
       return
     }
 

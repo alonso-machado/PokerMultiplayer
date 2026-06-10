@@ -12,8 +12,9 @@ export interface RoomOptions {
   onPlayerEliminated?: (playerId: string) => void
 }
 
-const EMPTY_TTL       = 10 * 60 * 1000
-const REBUY_TIMEOUT_S = 60
+const EMPTY_TTL           = 10 * 60 * 1000
+const REBUY_TIMEOUT_S     = 60
+const SHOWDOWN_DURATION_MS = Number(process.env.SHOWDOWN_DURATION_MS ?? 4000)
 
 export class Room {
   readonly id: string
@@ -221,13 +222,17 @@ export class Room {
       tableState: newState, players: this.game.publicPlayers(),
     })
 
-    // If new community cards were dealt (flop/turn/river), broadcast them separately
-    if (newState.communityCards.length > prevCommunityLen && prevPhase !== newPhase) {
+    // If new community cards were dealt, broadcast them regardless of how many phases advanced
+    if (newState.communityCards.length > prevCommunityLen) {
       const newCards = newState.communityCards.slice(prevCommunityLen)
+      // Determine display phase from total community card count
+      const displayPhase: 'flop' | 'turn' | 'river' =
+        newState.communityCards.length <= 3 ? 'flop' :
+        newState.communityCards.length === 4 ? 'turn' : 'river'
       this.broadcastAll({
         type: 'community_cards',
         cards: newCards,
-        phase: newPhase as 'flop' | 'turn' | 'river',
+        phase: displayPhase,
         tableState: newState,
         players: this.game.publicPlayers(),
       })
@@ -291,7 +296,7 @@ export class Room {
     setTimeout(() => {
       const eligible = this.players.filter(p => !p.sittingOut)
       if (eligible.length >= 2) this.dealHand()
-    }, 4000)
+    }, SHOWDOWN_DURATION_MS)
   }
 
   private notifyCurrentPlayer(): void {
