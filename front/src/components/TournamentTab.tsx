@@ -5,11 +5,14 @@ interface Props {
   tournament: TournamentInfo | null
   myToken: string | null
   ranking: TournamentPlayer[]
+  eliminated: { rank: number; total: number } | null
+  winnerName: string | null
   onRegister: () => void
   onUnregister: () => void
+  onDismissElimination: () => void
 }
 
-export function TournamentTab({ tournament, myToken, ranking, onRegister, onUnregister }: Props) {
+export function TournamentTab({ tournament, myToken, ranking, eliminated, winnerName, onRegister, onUnregister, onDismissElimination }: Props) {
   if (!tournament) {
     return (
       <div className="tournament-tab">
@@ -27,6 +30,14 @@ export function TournamentTab({ tournament, myToken, ranking, onRegister, onUnre
 
   return (
     <div className="tournament-tab">
+      {eliminated && (
+        <div className="elim-banner">
+          <span className="elim-rank">Você ficou em {eliminated.rank}º de {eliminated.total}</span>
+          {winnerName && <span className="elim-winner">🏆 Vencedor: {winnerName}</span>}
+          <button className="btn-dismiss" onClick={onDismissElimination}>OK</button>
+        </div>
+      )}
+
       <div className="tournament-card-main">
         <div className="tc-header">
           <span className="tc-name">{tournament.name}</span>
@@ -80,7 +91,7 @@ export function TournamentTab({ tournament, myToken, ranking, onRegister, onUnre
         )}
       </div>
 
-      {(isRunning || tournament.status === 'final_table') && ranking.length > 0 && (
+      {(isRunning || tournament.status === 'final_table' || tournament.status === 'finished') && ranking.length > 0 && (
         <RankingPanel players={ranking} status={tournament.status} />
       )}
     </div>
@@ -143,7 +154,11 @@ function RankingPanel({ players, status }: { players: TournamentPlayer[]; status
   const elim   = players.filter(p => p.eliminated)
   return (
     <div className="tc-ranking">
-      <h3>{status === 'final_table' ? '🔥 Mesa Final — Ranking' : '🏆 Ranking ao vivo'}</h3>
+      <h3>{
+        status === 'finished'    ? '🏆 Ranking final' :
+        status === 'final_table' ? '🔥 Mesa Final — Ranking' :
+        '🏆 Ranking ao vivo'
+      }</h3>
       <div className="tc-ranking-list">
         {active.map((p, i) => (
           <div key={p.id} className="tc-rank-row">

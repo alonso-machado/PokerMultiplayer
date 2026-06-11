@@ -285,18 +285,12 @@ input:focus { border-color: var(--gold); }
 .raise-row span:last-child { min-width: 60px; text-align: right; }
 .status-msg { color: var(--text-muted); font-size: 0.85rem; padding: 0.3rem 0; }
 
-/* ── Tournament eliminated screen ───────────────────────────────────────── */
-.eliminated-screen { background: #1a2e1f; border: 1px solid var(--border); border-radius: 12px; padding: 2rem; text-align: center; margin-top: 1.5rem; }
-.eliminated-screen h2 { color: #e07070; margin-bottom: 0.8rem; }
-.elim-rank { font-size: 1.2rem; color: var(--gold-light); margin-bottom: 0.5rem; font-weight: 700; }
-.elim-winner { color: var(--gold); margin-bottom: 1.5rem; font-size: 0.9rem; }
-.tournament-final-ranking { text-align: left; margin-top: 1rem; }
-.tournament-final-ranking h3 { color: var(--gold-light); font-size: 0.9rem; margin-bottom: 0.6rem; }
-.rank-row { display: flex; gap: 0.8rem; padding: 0.3rem 0.5rem; border-radius: 6px; font-size: 0.85rem; }
-.rank-row.rank-winner { background: rgba(201,168,76,0.15); color: var(--gold-light); font-weight: 700; }
-.rank-pos { color: var(--text-muted); min-width: 28px; }
-.rank-name { flex: 1; }
-.rank-chips { color: var(--chip); }
+/* ── Tournament eliminated banner (Torneio tab) ──────────────────────────── */
+.elim-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 0.8rem; background: #1a2e1f; border: 1px solid var(--border); border-radius: 12px; padding: 0.8rem 1.2rem; margin-bottom: 1rem; }
+.elim-rank { font-size: 1rem; color: var(--gold-light); font-weight: 700; }
+.elim-winner { color: var(--gold); font-size: 0.9rem; }
+.btn-dismiss { margin-left: auto; background: transparent; border: 1px solid var(--border); color: var(--text-muted); border-radius: 6px; padding: 0.3rem 0.8rem; cursor: pointer; }
+.btn-dismiss:hover { color: var(--text); border-color: var(--gold); }
 
 /* ── Tournament tab ─────────────────────────────────────────────────────── */
 .tournament-tab { display: flex; flex-direction: column; gap: 1.2rem; }

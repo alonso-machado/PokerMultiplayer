@@ -149,6 +149,11 @@ const server = Bun.serve<Session>({
 
   websocket: {
     open(ws) {
+      // Subscribe so broadcastRoomList()/broadcastTournamentInfo() (server.publish('lobby', ...))
+      // reach this socket — without this, clients only see lobby/tournament updates
+      // pushed at connect time and never learn about a newly-created tournament
+      // until they reload (new `hello` -> fresh tournament_info send).
+      ws.subscribe('lobby')
       send(ws, { type: 'room_list', rooms: lobbyRoomList() })
       send(ws, { type: 'tournament_info', tournament: activeTournament?.info() ?? null })
     },

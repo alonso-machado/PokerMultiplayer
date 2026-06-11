@@ -157,3 +157,29 @@ describe('Tournament — same-hand elimination tie-break', () => {
     expect(tournament.status).toBe('finished')
   })
 })
+
+describe('Tournament — re-registration for a new tournament', () => {
+  test('a token from a finished tournament does not carry over; the player must register again', () => {
+    const player = makePlayers(1)[0]!
+
+    // Tournament A: register and finish it.
+    const tournamentA = new Tournament('t-a', { name: 'A', scheduledStart: new Date(), config: CFG }, () => {}, () => {})
+    const tokenA = 'token-a'
+    tournamentA.register(player.id, player.name, player.send, tokenA)
+    expect(tournamentA.isRegistered(player.id)).toBe(true)
+    expect(tournamentA.findByToken(tokenA)?.playerId).toBe(player.id)
+    tournamentA.destroy()
+
+    // Tournament B: a brand new instance — the old token must not resolve here,
+    // and the player is not registered until they register again.
+    tournament = new Tournament('t-b', { name: 'B', scheduledStart: new Date(), config: CFG }, () => {}, () => {})
+    expect(tournament.findByToken(tokenA)).toBeUndefined()
+    expect(tournament.isRegistered(player.id)).toBe(false)
+
+    // Registering again (with a fresh token) for tournament B works.
+    const tokenB = 'token-b'
+    expect(tournament.register(player.id, player.name, player.send, tokenB)).toBe(true)
+    expect(tournament.isRegistered(player.id)).toBe(true)
+    expect(tournament.findByToken(tokenB)?.playerId).toBe(player.id)
+  })
+})

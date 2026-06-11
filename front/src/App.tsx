@@ -37,6 +37,11 @@ function App() {
   const [isFinalTable,         setIsFinalTable]         = useState(false)
   const [nextBlinds,           setNextBlinds]           = useState<BlindLevel | null>(null)
   const [nextBlindsInSec,      setNextBlindsInSec]      = useState<number | null>(null)
+  // Whether the player's current `roomId` is a tournament table (vs a regular
+  // lobby room). Drives `isTournament` in PokerTable — distinct from
+  // `myTournamentToken`, which stays set after elimination so the player can
+  // keep watching the tournament ranking.
+  const [inTournamentRoom,     setInTournamentRoom]     = useState(false)
 
   // Room / game
   const [roomId,    setRoomId]    = useState<string | null>(null)
@@ -58,13 +63,24 @@ function App() {
   const handleMessage = useCallback((msg: ServerMessage) => {
     switch (msg.type) {
       case 'room_list':       setRooms(msg.rooms); break
-      case 'tournament_info': setTournamentInfo(msg.tournament); break
+      case 'tournament_info':
+        // A brand-new tournament (different id) means our previous registration
+        // token is stale — let the player register again for this one.
+        setTournamentInfo(prev => {
+          if (msg.tournament && prev && prev.id !== msg.tournament.id) {
+            setMyTournamentToken(null); clearTournamentToken()
+            setTournamentRanking([]); setTournamentStatus('registering')
+            setTournamentEliminated(null); setTournamentWinner(null); setIsFinalTable(false)
+          }
+          return msg.tournament
+        })
+        break
 
       case 'room_joined':
         setRoomId(msg.roomId); setRoomName(msg.roomName); setRoomConfig(msg.config)
         setIsStarted(false); setMyCards([]); setTableState(null)
         setTurn(null); setShowdown(null); setHandResult(null)
-        setIsAway(false); setRebuyPrompt(null)
+        setIsAway(false); setRebuyPrompt(null); setInTournamentRoom(false)
         posthog?.capture('lobby_joined', { room_id: msg.roomId, room_name: msg.roomName, big_blind: msg.config.bigBlind })
         break
 
@@ -129,6 +145,7 @@ function App() {
         setRoomId(msg.roomId); setRoomName(msg.roomName); setRoomConfig(msg.config)
         setIsStarted(false); setMyCards([]); setTableState(null)
         setTurn(null); setShowdown(null); setHandResult(null); setIsAway(false)
+        setInTournamentRoom(true)
         break
       case 'tournament_ranking':
         setTournamentRanking(msg.players); setTournamentStatus(msg.status); break
@@ -137,6 +154,7 @@ function App() {
       case 'tournament_eliminated':
         setTournamentEliminated({ rank: msg.rank, total: msg.totalPlayers })
         setRoomId(null); setTurn(null); setMyCards([]); setTableState(null)
+        setInTournamentRoom(false); setActiveTab('tournament')
         posthog?.capture('tournament_eliminated', { rank: msg.rank, total_players: msg.totalPlayers })
         break
       case 'tournament_finished':
@@ -153,6 +171,7 @@ function App() {
           setRoomId(msg.roomId); setRoomName(msg.roomName ?? '')
           setRoomConfig(msg.config); setIsStarted(true)
         }
+        setInTournamentRoom(msg.inTournament)
         break
 
       case 'identity':
@@ -197,10 +216,10 @@ function App() {
           showdown={showdown} handResult={handResult}
           rebuyPrompt={rebuyPrompt}
           isStarted={isStarted} isAway={isAway}
-          isTournament={!!myTournamentToken}
+          isTournament={inTournamentRoom}
           isFinalTable={isFinalTable}
-          tournamentRanking={myTournamentToken ? tournamentRanking : null}
-          tournamentStatus={myTournamentToken ? tournamentStatus : null}
+          tournamentRanking={inTournamentRoom ? tournamentRanking : null}
+          tournamentStatus={inTournamentRoom ? tournamentStatus : null}
           nextBlinds={nextBlinds}
           nextBlindsInSec={nextBlindsInSec}
           onLeave={exitRoom}
@@ -211,36 +230,6 @@ function App() {
           onSetBack={() => { send({ type: 'set_back' }); setIsAway(false) }}
         />
         <HandGuide />
-      </>
-    )
-  }
-
-  if (tournamentEliminated) {
-    return (
-      <>
-      <div className="lobby">
-        <h1>♠ Texas Hold'em ♥</h1>
-        <div className="eliminated-screen">
-          <h2>Você foi eliminado</h2>
-          <p className="elim-rank">{tournamentEliminated.rank}º de {tournamentEliminated.total}</p>
-          {tournamentWinner && <p className="elim-winner">🏆 Vencedor: {tournamentWinner}</p>}
-          <div className="tournament-final-ranking">
-            <h3>Ranking final</h3>
-            {tournamentRanking.map((p, i) => (
-              <div key={p.id} className={`rank-row${i === 0 ? ' rank-winner' : ''}`}>
-                <span className="rank-pos">{i + 1}º</span>
-                <span className="rank-name">{p.name}</span>
-                <span className="rank-chips">{p.chips.toLocaleString()}</span>
-              </div>
-            ))}
-          </div>
-          <button className="btn-confirm" style={{ marginTop: '1.5rem' }} onClick={() => {
-            setTournamentEliminated(null); setMyTournamentToken(null)
-            setTournamentRanking([]); clearTournamentToken()
-          }}>Voltar ao lobby</button>
-        </div>
-      </div>
-      <HandGuide />
       </>
     )
   }
@@ -267,12 +256,15 @@ function App() {
           tournament={tournamentInfo}
           myToken={myTournamentToken}
           ranking={tournamentRanking}
+          eliminated={tournamentEliminated}
+          winnerName={tournamentWinner}
           onRegister={() => { send({ type: 'register_tournament' }) }}
           onUnregister={() => {
             send({ type: 'unregister_tournament' })
             posthog?.capture('tournament_unregistered')
             setMyTournamentToken(null); clearTournamentToken()
           }}
+          onDismissElimination={() => setTournamentEliminated(null)}
         />
       )}
     </div>
