@@ -199,9 +199,9 @@ const server = Bun.serve<Session>({
 
         // Restore tournament registration
         const tToken = session.tournamentToken
-        if (tToken && activeTournament) {
-          const reg = activeTournament.findByToken(tToken)
-          if (reg) {
+        if (tToken) {
+          const reg = activeTournament?.findByToken(tToken)
+          if (reg && activeTournament) {
             activeTournament.updateSendFn(reg.playerId, emit)
             session.playerId = reg.playerId
             const tableId = activeTournament.getTableId(reg.playerId)
@@ -215,6 +215,13 @@ const server = Bun.serve<Session>({
             }
             emit({ type: 'tournament_info', tournament: activeTournament.info() })
             activeTournament.broadcastRanking()
+          } else {
+            // Token belongs to a tournament that no longer exists (finished &
+            // replaced, or server restarted) — clear it so the client shows
+            // the registration UI for whatever tournament is open now.
+            session.tournamentToken = null
+            setPersistentToken(session.playerId, null)
+            emit({ type: 'tournament_unregistered' })
           }
         }
         return
