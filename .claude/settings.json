@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bun test *)",
+      "Bash(bun run *)",
+      "Bash(bun build *)",
+      "Bash(bun x *)",
+      "Bash(bun *)",
+      "Bash(grep *)",
+      "Bash(cd *)"
+    ],
+    "ask": [
+      "Bash(rm *)",
+      "Bash(mkdir *)"
+    ]
+  }
+}

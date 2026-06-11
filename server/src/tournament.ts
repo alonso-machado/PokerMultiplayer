@@ -147,7 +147,7 @@ export class Tournament {
       })
     }
 
-    this.distributeToTables()
+    const tableRooms = this.distributeToTables()
     this.startBlindTimer()
 
     // 30s ranking broadcast
@@ -155,6 +155,10 @@ export class Tournament {
       if (this.status === 'running' || this.status === 'final_table') this.broadcastRanking()
     }, RANKING_INTERVAL_MS)
 
+    // Tell each player which table they're on BEFORE dealing the first hand —
+    // the front switches to the table view on `tournament_table_assigned`,
+    // resetting cards/turn/table state. If `hand_dealt`/`your_turn` arrived
+    // first (from room.startGame() below), that reset would wipe them out.
     for (const reg of this.registrations.values()) {
       reg.send({ type: 'tournament_started' })
       const tp = this.activePlayers.get(reg.playerId)
@@ -163,6 +167,8 @@ export class Tournament {
         if (room) reg.send({ type: 'tournament_table_assigned', roomId: room.id, roomName: room.name, config: room.config })
       }
     }
+
+    for (const room of tableRooms) room.startGame()
 
     this.broadcastRanking()
   }
@@ -210,7 +216,10 @@ export class Tournament {
 
   // ── Table distribution ────────────────────────────────────────────────────
 
-  private distributeToTables(): void {
+  /** Create tables and seat all registered players. Does NOT start dealing —
+   *  callers must send `tournament_table_assigned` and then call
+   *  `room.startGame()` on each returned room (see `start()`). */
+  private distributeToTables(): Room[] {
     const players = [...this.registrations.values()]
     const count   = Math.ceil(players.length / MAX_PER_TABLE)
     const tableRooms: Room[] = []
@@ -218,7 +227,7 @@ export class Tournament {
     for (let i = 0; i < count; i++) {
       const room = new Room(
         generateId(), `${this.name} — Mesa ${i + 1}`, this.name, this.config,
-        { tournamentId: this.id, onPlayerEliminated: (pid) => this.onEliminated(pid) },
+        { tournamentId: this.id, onPlayersEliminated: (eliminations) => this.onEliminated(eliminations) },
       )
       tableRooms.push(room); this.tables.set(room.id, room)
     }
@@ -230,18 +239,26 @@ export class Tournament {
       if (tp) { tp.tableId = room.id; tp.tableName = room.name }
     })
 
-    for (const room of tableRooms) room.startGame()
     this.onTablesChanged(this.tables)
+    return tableRooms
   }
 
   // ── Elimination ───────────────────────────────────────────────────────────
 
-  private onEliminated(pid: string): void {
-    const tp = this.activePlayers.get(pid); if (!tp || tp.eliminated) return
-    tp.eliminated = true; tp.chips = 0; tp.tableId = null; tp.tableName = null
-    tp.rank = this.rankCounter--; tp.eliminatedAt = Date.now()
+  private onEliminated(eliminations: { playerId: string; totalBet: number }[]): void {
+    // Same-hand (simultaneous) eliminations are ranked by chips committed to
+    // the pot that hand: the player who put in the LEAST is ranked worst
+    // (assigned first, i.e. gets the lowest remaining rankCounter value),
+    // and the player who put in the MOST is ranked best among the bustouts.
+    const ordered = [...eliminations].sort((a, b) => a.totalBet - b.totalBet)
+    const now = Date.now()
+    for (const { playerId: pid } of ordered) {
+      const tp = this.activePlayers.get(pid); if (!tp || tp.eliminated) continue
+      tp.eliminated = true; tp.chips = 0; tp.tableId = null; tp.tableName = null
+      tp.rank = this.rankCounter--; tp.eliminatedAt = now
 
-    this.registrations.get(pid)?.send({ type: 'tournament_eliminated', rank: tp.rank, totalPlayers: this.totalPlayers })
+      this.registrations.get(pid)?.send({ type: 'tournament_eliminated', rank: tp.rank, totalPlayers: this.totalPlayers })
+    }
 
     this.broadcastRanking()  // immediate on elimination
     this.checkRebalance()
@@ -281,14 +298,14 @@ export class Tournament {
 
     const finalRoom = new Room(
       generateId(), `${this.name} — Mesa Final`, this.name, this.config,
-      { tournamentId: this.id, onPlayerEliminated: (pid) => this.onEliminated(pid) },
+      { tournamentId: this.id, onPlayersEliminated: (eliminations) => this.onEliminated(eliminations) },
     )
     this.tables.set(finalRoom.id, finalRoom)
 
     for (const tp of remaining) {
       const old = tp.tableId ? this.tables.get(tp.tableId) : null
       const send = old?.getSendFn(tp.id); if (!send) continue
-      const chips = old?.getPlayerChips(tp.id) ?? tp.chips
+      const chips = old?.getPlayerMigrationChips(tp.id) ?? tp.chips
       old?.moveTournamentPlayer(tp.id)
       finalRoom.addTournamentPlayer(tp.id, tp.name, send, chips)
       tp.tableId = finalRoom.id; tp.tableName = finalRoom.name

@@ -12,7 +12,7 @@ type LeaveReason = 'leave' | 'rebuy_decline' | 'rebuy_timeout' | 'tournament_mov
 export interface RoomOptions {
   tournamentId?: string
   onExpire?: () => void
-  onPlayerEliminated?: (playerId: string) => void
+  onPlayersEliminated?: (eliminations: { playerId: string; totalBet: number }[]) => void
 }
 
 const EMPTY_TTL           = 10 * 60 * 1000
@@ -33,7 +33,7 @@ export class Room {
   private expireTimer: ReturnType<typeof setTimeout> | null = null
   private rebuyTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly onExpire?: () => void
-  private readonly onPlayerEliminated?: (pid: string) => void
+  private readonly onPlayersEliminated?: (eliminations: { playerId: string; totalBet: number }[]) => void
 
   constructor(id: string, name: string, creatorName: string, config: RoomConfig, opts: RoomOptions = {}) {
     this.id           = id
@@ -43,7 +43,7 @@ export class Room {
     this.startingChips = startingChipsFor(config)
     this.tournamentId  = opts.tournamentId
     this.onExpire      = opts.onExpire
-    this.onPlayerEliminated = opts.onPlayerEliminated
+    this.onPlayersEliminated = opts.onPlayersEliminated
     this.game = new PokerGame(config)
     if (!opts.tournamentId) this.scheduleExpiry()
   }
@@ -293,7 +293,12 @@ export class Room {
       amount: result.amount, handName: result.handName,
     })
 
-    // Handle 0-chip players
+    // Handle 0-chip players. Eliminations from a multi-bust hand are reported
+    // as a single batch — the tournament must mark all of them eliminated
+    // before checking rebalance/final-table/finished, otherwise a table
+    // merge triggered by the first bust would yank the still-mid-loop busted
+    // players out as zombie 0-chip seats.
+    const busted: { playerId: string; totalBet: number }[] = []
     for (const gp of this.game.players) {
       if (gp.chips > 0) continue
       const rp = this.players.find(p => p.id === gp.id)
@@ -301,7 +306,7 @@ export class Room {
 
       if (this.tournamentId) {
         rp.sittingOut = true
-        this.onPlayerEliminated?.(gp.id)
+        busted.push({ playerId: gp.id, totalBet: gp.totalBet })
       } else {
         // Lobby rebuy: mark sitting out, send prompt, start 60s timer
         rp.sittingOut = true
@@ -309,6 +314,7 @@ export class Room {
         this.startRebuyTimer(gp.id)
       }
     }
+    if (busted.length > 0) this.onPlayersEliminated?.(busted)
 
     setTimeout(() => {
       const eligible = this.players.filter(p => !p.sittingOut)
@@ -358,6 +364,16 @@ export class Room {
 
   getSendFn(pid: string):      SendFn | undefined { return this.players.find(p => p.id === pid)?.send }
   getPlayerChips(pid: string): number             { return this.game.players.find(p => p.id === pid)?.chips ?? 0 }
+
+  /** Chip count to carry over when this whole table is being dissolved
+   *  (e.g. final-table consolidation). If a hand is mid-progress, this
+   *  refunds the player's contribution to the not-yet-resolved pot — once
+   *  resolved (`pot === 0`), `chips` already reflects the payout. */
+  getPlayerMigrationChips(pid: string): number {
+    const gp = this.game.players.find(p => p.id === pid)
+    if (!gp) return 0
+    return this.game.tableState.pot > 0 ? gp.chips + gp.totalBet : gp.chips
+  }
 
   // ── Internal ──────────────────────────────────────────────────────────────
 
