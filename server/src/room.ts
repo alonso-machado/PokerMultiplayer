@@ -1,10 +1,13 @@
 import type { RoomConfig, RoomSummary, ServerMessage, PlayerAction } from '../../shared/types'
 import { startingChipsFor } from '../../shared/types'
 import { PokerGame } from './poker/gameEngine'
+import { logger } from './logger'
 
 export type SendFn = (msg: ServerMessage) => void
 
 interface RoomPlayer { id: string; name: string; send: SendFn; away: boolean; sittingOut: boolean }
+
+type LeaveReason = 'leave' | 'rebuy_decline' | 'rebuy_timeout' | 'tournament_move'
 
 export interface RoomOptions {
   tournamentId?: string
@@ -115,12 +118,21 @@ export class Room {
     return true
   }
 
-  leave(playerId: string): void {
+  leave(playerId: string, reason: LeaveReason = 'leave'): void {
     this.cancelRebuyTimer(playerId)
+    const wasPresent = this.players.some(p => p.id === playerId)
     this.players = this.players.filter(p => p.id !== playerId)
     this.game.removePlayer(playerId)
     this.broadcastAll({ type: 'player_list', players: this.game.publicPlayers() })
     if (this.players.length < 2 && !this.tournamentId) this.scheduleExpiry()
+    if (wasPresent) {
+      logger.info('player_left_room', {
+        'poker.room_id': this.id,
+        'poker.player_id': playerId,
+        'poker.reason': reason,
+        'poker.player_count': this.players.length,
+      })
+    }
   }
 
   // ── Start ─────────────────────────────────────────────────────────────────
@@ -170,6 +182,11 @@ export class Room {
     const gp = this.game.players.find(p => p.id === pid)
     if (gp) { gp.chips = this.startingChips; gp.status = 'waiting' }
     else     this.game.addPlayer(pid, rp.name, this.startingChips)
+    logger.info('player_rebuy', {
+      'poker.room_id': this.id,
+      'poker.player_id': pid,
+      'poker.starting_chips': this.startingChips,
+    })
     this.broadcastAll({ type: 'player_list', players: this.game.publicPlayers() })
     // If no hand is running and we now have enough players, start the next hand
     this.tryDealIfReady()
@@ -177,14 +194,14 @@ export class Room {
 
   handleRebuyDecline(pid: string): void {
     this.cancelRebuyTimer(pid)
-    this.leave(pid)
+    this.leave(pid, 'rebuy_decline')
   }
 
   private startRebuyTimer(pid: string): void {
     this.cancelRebuyTimer(pid)
     const timer = setTimeout(() => {
       // Auto-decline after 60s
-      this.leave(pid)
+      this.leave(pid, 'rebuy_timeout')
     }, REBUY_TIMEOUT_S * 1000)
     this.rebuyTimers.set(pid, timer)
   }
@@ -335,7 +352,7 @@ export class Room {
     const gp = this.game.players.find(p => p.id === pid)
     if (!gp) return null
     const r = { name: gp.name, chips: gp.chips }
-    this.leave(pid)
+    this.leave(pid, 'tournament_move')
     return r
   }
 

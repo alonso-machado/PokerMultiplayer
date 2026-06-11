@@ -7,6 +7,7 @@ import type { ClientMessage, ServerMessage } from '../../shared/types'
 import { parseClientMessage } from './validation'
 import { issueToken, verifyToken, newPlayerId } from './identity'
 import { openapiSpec, swaggerUiHtml } from './openapi'
+import { logger } from './logger'
 
 const IS_DEV = process.env.NODE_ENV !== 'production'
 import { Room } from './room'
@@ -112,7 +113,11 @@ const server = Bun.serve<Session>({
 
   fetch(req, server) {
     const url = new URL(req.url)
-    const { pathname, method } = url
+    const { method } = url
+    // Collapse repeated slashes (e.g. "//api/admin/login" -> "/api/admin/login").
+    // A trailing slash on VITE_SERVER_URL would otherwise produce a path that
+    // silently misses every route below and falls through to the catch-all.
+    const pathname = url.pathname.replace(/\/{2,}/g, '/')
 
     if (method === 'OPTIONS')
       return new Response(null, { status: 204, headers: cors() })
@@ -327,7 +332,7 @@ const server = Bun.serve<Session>({
     },
 
     close(ws) {
-      console.log(`[-] ${ws.data.playerId || '?'} disconnected`)
+      logger.info('player_disconnected', { 'poker.player_id': ws.data.playerId || null })
       // Lobby players stay in their room (persistent session handles reconnect)
       // Tournament players stay registered via token cookie
     },
@@ -369,7 +374,7 @@ function broadcastTournamentInfo(): void {
   server.publish('lobby', JSON.stringify({ type: 'tournament_info', tournament: activeTournament?.info() ?? null } satisfies ServerMessage))
 }
 
-console.log(`🃏 Poker server on http://localhost:${server.port}`)
+logger.info('server_started', { 'poker.port': server.port, 'poker.url': `http://localhost:${server.port}` })
 
 process.on('SIGTERM', async () => {
   await shutdownTelemetry()

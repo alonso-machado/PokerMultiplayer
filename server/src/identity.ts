@@ -12,6 +12,8 @@
  * signs their Google sub claim with the same key, keeping the token format identical.
  */
 
+import { logger } from './logger'
+
 const SECRET = process.env.PLAYER_SECRET
 
 let _key: CryptoKey | null = null
@@ -24,7 +26,7 @@ async function getKey(): Promise<CryptoKey> {
     raw = hexToBytes(SECRET)
   } else {
     raw = crypto.getRandomValues(new Uint8Array(32))
-    console.warn('[identity] PLAYER_SECRET not set — sessions will not survive server restart')
+    logger.warn('player_secret_not_set', { hint: 'sessions will not survive server restart' })
   }
   _key = await crypto.subtle.importKey('raw', raw, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify'])
   return _key
