@@ -63,6 +63,32 @@ PokerMultiplayer/
 - Mostra todos os jogadores com fichas atuais e mesa em que estão jogando.
 - Atualiza a cada **30 segundos** (performance) + imediatamente em eliminações.
 
+### Eliminação simultânea (mesmo all-in)
+- Quando vários jogadores zeram fichas na **mesma mão** (all-in com side pots),
+  o desempate de ranking é por **fichas apostadas naquela mão**: quem apostou
+  menos fica pior colocado, quem apostou mais fica melhor colocado entre os
+  eliminados — mesmo todos tendo "morrido" no mesmo instante.
+
+### Após ser eliminado
+- Não existe mais tela de "eliminado" separada. O jogador volta para o lobby
+  com a aba "🏆 Torneio" aberta, vendo um banner com sua colocação final
+  (dispensável) e o ranking ao vivo/final.
+- Pode jogar normalmente em mesas de lobby comuns enquanto o torneio continua.
+- Pode voltar à aba Torneio a qualquer momento — durante ou **depois** de
+  encerrado — para conferir o ranking final.
+
+### Início enquanto numa mesa de lobby
+- Se o torneio iniciar enquanto o jogador inscrito está numa mesa de lobby
+  comum, ele é movido **automaticamente** para sua mesa do torneio (assento na
+  mesa de lobby é liberado). Nenhuma notificação extra é necessária.
+
+### Novo torneio após o anterior encerrar
+- Só existe **um torneio ativo** por vez; um novo só pode ser criado pelo admin
+  quando o anterior está `finished`.
+- Inscrição/token de um torneio encerrado **não vale** para o novo — a aba
+  Torneio mostra "Inscrever-se" novamente para todos os jogadores (mesmo quem
+  já estava com o app aberto), e o ranking/estado do torneio anterior some.
+
 ---
 
 ## Painel Admin

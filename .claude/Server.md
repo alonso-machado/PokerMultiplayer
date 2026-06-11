@@ -58,7 +58,19 @@ inicia automaticamente após 300ms (via `setTimeout`). Não há botão de start 
 lobby — qualquer jogador pode forçar via `start_game` como fallback.
 
 **Broadcast:** feito via `server.publish('lobby', ...)` do Bun para room_list e
-tournament_info. Mensagens específicas de jogador são enviadas via `send()` diretamente.
+tournament_info. Toda conexão chama `ws.subscribe('lobby')` em `open()` — sem
+essa subscrição o `publish` não entrega nada a sockets já conectados (eles só
+recebem o snapshot inicial enviado no `open`). Mensagens específicas de jogador
+são enviadas via `send()` diretamente.
+
+**Roteamento de sala por jogador:** `currentRoom(session)` é a função central
+para resolver em qual `Room` as ações de um jogador (`player_action`,
+`set_away`, `set_back`, `start_game`) devem ser aplicadas. Para jogadores
+registrados e não-eliminados num torneio, prefere
+`activeTournament.getTableId(playerId)` (atualizado pelo `Tournament` em
+start/rebalance/mesa-final) em vez do `session.roomId`, que só é atualizado em
+`create_room`/`join_room`/`hello`. Veja `.claude/Tournament.md` → "Roteamento de
+Ações durante o Torneio".
 
 **Shared types:** importados com path relativo `../../shared/types`. Nunca duplique
 tipos — qualquer tipo compartilhado entre front e server deve viver em `shared/`.

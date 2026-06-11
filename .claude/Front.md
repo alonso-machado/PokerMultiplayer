@@ -59,6 +59,27 @@ migrar para um reducer em App.
 
 **Roteamento:** sem React Router. A seleção de view é feita por estado (`view: 'lobby' | 'table' | 'tournament'`).
 
+**Pós-eliminação no torneio:** não existe mais uma tela cheia de "Você foi
+eliminado". Ao receber `tournament_eliminated`, o app volta para a UI normal
+(lobby + abas) com a aba "🏆 Torneio" selecionada e mostra um banner dispensável
+com a colocação final / vencedor. O ranking (`tournament_ranking`) continua
+sendo exibido na aba Torneio mesmo com `status: 'finished'` ("🏆 Ranking
+final"), e o jogador pode jogar em mesas de lobby normalmente.
+
+**`inTournamentRoom` vs `myTournamentToken`:** `myTournamentToken` indica
+inscrição no torneio (usado para mostrar ranking/registro), mas **não** indica
+que o jogador está sentado numa mesa de torneio agora — após a eliminação ele
+pode estar numa mesa de lobby comum. `inTournamentRoom` (true somente entre
+`tournament_table_assigned` e `room_joined`/`tournament_eliminated`) é o que
+controla `isTournament` na `PokerTable` (esconder "Sair da mesa", mostrar
+ranking lateral, etc.).
+
+**Re-inscrição para um novo torneio:** quando `tournament_info.id` muda (novo
+torneio criado pelo admin), o front limpa `myTournamentToken`/cookie e reseta
+ranking/status/eliminação — o jogador vê "Inscrever-se" para o novo torneio.
+O servidor reforça isso no `hello`: token que não resolve no torneio atual gera
+`tournament_unregistered`.
+
 **Deploy:** Vercel com `vercel.json` configurando fallback de SPA. O build usa
 `npm` (não Bun) porque o runner de build do Vercel é Node/npm. Variáveis de
 ambiente são injetadas no build pelo Vite como `import.meta.env.VITE_*`.

@@ -54,6 +54,20 @@ function send(ws: { send: (d: string) => void }, msg: ServerMessage): void {
   ws.send(JSON.stringify(msg))
 }
 
+/** Resolve the room a player's actions should be routed to. Tournament tables
+ *  can change under a player (start, rebalance, final-table consolidation)
+ *  without `session.roomId` being updated for already-connected sockets, so
+ *  for registered (and not-yet-eliminated) players the tournament's own
+ *  table-tracking is the source of truth. Falls back to `session.roomId`
+ *  for lobby play and for eliminated players who joined a regular table. */
+function currentRoom(session: Session): Room | undefined {
+  if (activeTournament) {
+    const tableId = activeTournament.getTableId(session.playerId)
+    if (tableId) return rooms.get(tableId)
+  }
+  return session.roomId ? rooms.get(session.roomId) : undefined
+}
+
 // ── Admin callbacks ───────────────────────────────────────────────────────────
 
 const handleAdmin = adminRouter(
@@ -92,7 +106,27 @@ const handleAdmin = adminRouter(
   () => {
     if (!activeTournament) return { ok: false, error: 'Nenhum torneio.' }
     if (activeTournament.status !== 'registering') return { ok: false, error: 'Já iniciado.' }
-    activeTournament.start(); broadcastTournamentInfo(); return { ok: true }
+    activeTournament.start()
+
+    // A registered player may have been sitting in a regular lobby room when
+    // the tournament kicked off — `tournament_table_assigned` already told
+    // their client to switch to the tournament table, so pull them out of
+    // the lobby room on the server too (free the seat for other players).
+    for (const reg of activeTournament.registrations.values()) {
+      const ps = playerSessions.get(reg.playerId)
+      const oldRoomId = ps?.roomId
+      if (!oldRoomId) continue
+      const oldRoom = rooms.get(oldRoomId)
+      if (oldRoom && !oldRoom.tournamentId) {
+        oldRoom.leave(reg.playerId, 'tournament_move')
+        if (oldRoom.playerCount === 0) { oldRoom.destroy(); rooms.delete(oldRoomId) }
+      }
+      if (ps) ps.roomId = null
+    }
+
+    broadcastRoomList()
+    broadcastTournamentInfo()
+    return { ok: true }
   },
 
   () => {
@@ -277,13 +311,13 @@ const server = Bun.serve<Session>({
           break
 
         case 'start_game': {
-          const room = session.roomId ? rooms.get(session.roomId) : undefined
+          const room = currentRoom(session)
           room?.startGame(session.playerId)
           break
         }
 
         case 'player_action': {
-          const room = session.roomId ? rooms.get(session.roomId) : undefined
+          const room = currentRoom(session)
           room?.handleAction(session.playerId, msg.action, msg.amount)
           break
         }
@@ -308,12 +342,12 @@ const server = Bun.serve<Session>({
 
         // ── Away (tournament tables only) ───────────────────────────────────
         case 'set_away': {
-          const room = session.roomId ? rooms.get(session.roomId) : undefined
+          const room = currentRoom(session)
           if (room?.tournamentId) room.setAway(session.playerId)
           break
         }
         case 'set_back': {
-          const room = session.roomId ? rooms.get(session.roomId) : undefined
+          const room = currentRoom(session)
           if (room?.tournamentId) room.setBack(session.playerId)
           break
         }

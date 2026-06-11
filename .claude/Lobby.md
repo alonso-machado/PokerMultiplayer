@@ -88,6 +88,23 @@ Campos relevantes ao Lobby: `chips`, `status`, `sittingOut`.
 
 ---
 
+## Saída automática ao iniciar um torneio
+
+Se um jogador **inscrito no torneio** estiver sentado numa sala de lobby comum
+quando o torneio iniciar:
+
+1. O servidor remove esse jogador da sala de lobby (`room.leave`), libera o
+   assento e destrói a sala se ela ficar vazia; `room_list` é re-transmitido.
+2. O cliente já recebeu `tournament_table_assigned` (enviado pelo `Tournament`
+   antes de qualquer `hand_dealt`) e troca a view para a mesa do torneio
+   automaticamente — sem notificação extra, o jogador "vai direto para o
+   torneio".
+3. Ações subsequentes (`player_action`, etc.) são roteadas para a mesa do
+   torneio via `currentRoom(session)` (ver `.claude/Server.md`), mesmo que
+   `session.roomId` da conexão ainda aponte para a sala antiga.
+
+---
+
 ## Regras de Rebuy (Lobby)
 
 Rebuy existe **somente em salas de lobby** — não em torneios.
