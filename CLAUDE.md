@@ -57,17 +57,21 @@ Isso não pode se repetir.
 │   ├── Tournament.md
 │   └── BloomFilter.md
 ├── Dockerfile       Build Docker para Render.com (free tier)
-├── render.yaml      Config de deploy no Render
-└── railway.toml     Config Railway (sleepApplication=true enquanto não migra)
+└── render.yaml      Config de deploy no Render
 ```
 
 ## Deploy
 
+Stack atual: **Vercel + Render**.
+
 | Serviço | O que roda | Config |
 |---|---|---|
-| Render.com (destino) | Backend Bun via Docker | `render.yaml` |
-| Vercel (ativo) | Frontend React estático | `vercel.json` |
-| Railway (legado) | Backend Bun — sleep ativado | `railway.toml` |
+| Render.com | Backend Bun via Docker | `render.yaml` |
+| Vercel | Frontend React estático | `vercel.json` |
+
+> **Histórico:** o backend já foi hospedado no **Railway**. Migramos para o
+> Render por custo (free tier mais previsível). A config do Railway
+> (`railway.toml` / `railway.json`) foi removida do repositório.
 
 Variáveis de ambiente sensíveis (`PLAYER_SECRET`, `ADMIN_USER`, `ADMIN_PASS`)
 nunca ficam em arquivos commitados — apenas nos painéis de cada plataforma.

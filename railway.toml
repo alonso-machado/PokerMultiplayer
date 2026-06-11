@@ -1,6 +1,0 @@
-[build]
-buildCommand = "cd server && bun install"
-
-[deploy]
-startCommand = "cd server && bun start"
-sleepApplication = true

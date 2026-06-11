@@ -10,7 +10,7 @@ Dois modos: **Lobby** (mesas casuais) e **Torneio** (único, gerenciado por admi
 ```
 PokerMultiplayer/
 ├── front/     # React 19 + Vite + TypeScript  →  deploy Vercel
-├── server/    # Bun + TypeScript + WebSocket nativo  →  deploy Railway / Fly.io
+├── server/    # Bun + TypeScript + WebSocket nativo  →  deploy Render
 ├── shared/    # Tipos e funções compartilhados (sem dependência de framework)
 └── README.md
 ```
@@ -142,36 +142,33 @@ O frontend **acumula** as `community_cards`:
 
 Variáveis de ambiente no painel Vercel:
 ```
-VITE_WS_URL         wss://seu-server.railway.app/ws
-VITE_SERVER_URL     https://seu-server.railway.app
+VITE_WS_URL         wss://seu-server.onrender.com/ws
+VITE_SERVER_URL     https://seu-server.onrender.com
 VITE_POSTHOG_KEY    phc_...
 VITE_POSTHOG_HOST   https://us.i.posthog.com
 ```
 
-### Servidor → Railway
+### Servidor → Render
 
-1. Conecte o repositório e selecione a pasta `server/` como root.
-2. Start command: `bun src/index.ts`
-3. Adicione as variáveis de ambiente (ou GitHub Secrets):
+O backend é buildado via **Docker** (`Dockerfile`) e configurado em `render.yaml`.
+
+1. Conecte o repositório no Render como **Web Service** (runtime Docker).
+2. O `render.yaml` já define build e start command — não precisa configurar manualmente.
+3. Adicione as variáveis de ambiente no painel do Render:
 
 ```
-PORT                3001           # Railway injeta automaticamente
+PORT                3000           # Render injeta automaticamente
 NODE_ENV            production
 ADMIN_USER          <seu-usuario>
 ADMIN_PASS          <senha-forte>
+PLAYER_SECRET       <hex 32 bytes — openssl rand -hex 32>
 NEW_RELIC_LICENSE_KEY   NRAK-...
 NEW_RELIC_OTLP_ENDPOINT https://otlp.nr-data.net
 NEW_RELIC_APP_NAME      poker-server
 ```
 
-### Servidor → Fly.io (alternativa)
-
-```bash
-cd server
-fly launch
-fly secrets set ADMIN_USER=xxx ADMIN_PASS=yyy NEW_RELIC_LICENSE_KEY=NRAK-...
-fly deploy
-```
+> **Histórico:** o backend já rodou no **Railway**. Migramos para o Render por
+> ser mais econômico. A config do Railway foi removida do repositório.
 
 ---
 
@@ -197,7 +194,7 @@ cp front/.env.example  front/.env.local
 
 | Arquivo | Var | Obrigatório em prod | Descrição |
 |---------|-----|---------------------|-----------|
-| `server/.env` | `PORT` | ✓ (auto Railway) | Porta HTTP/WS |
+| `server/.env` | `PORT` | ✓ (auto Render) | Porta HTTP/WS |
 | `server/.env` | `NODE_ENV` | ✓ | `production` |
 | `server/.env` | `ADMIN_USER` | ✓ | Login do painel admin |
 | `server/.env` | `ADMIN_PASS` | ✓ | Senha do painel admin |

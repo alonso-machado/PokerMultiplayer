@@ -83,7 +83,7 @@ Copie `server/.env.example` para `server/.env` e preencha:
 
 ```env
 # Porta HTTP/WebSocket
-# Railway e Fly.io injetam PORT automaticamente — não precisa setar em prod.
+# O Render injeta PORT automaticamente — não precisa setar em prod.
 PORT=3001
 
 # Ambiente (afeta o atributo deployment.environment no OTel)

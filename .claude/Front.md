@@ -70,12 +70,12 @@ Copie `front/.env.example` para `front/.env.local` e preencha:
 ```env
 # URL do WebSocket do servidor
 # Local:    ws://localhost:3001/ws
-# Produção: wss://seu-app.railway.app/ws
+# Produção: wss://seu-app.onrender.com/ws
 VITE_WS_URL=ws://localhost:3001/ws
 
 # URL base HTTP do servidor (API admin + torneio público)
 # Local:    http://localhost:3001
-# Produção: https://seu-app.railway.app
+# Produção: https://seu-app.onrender.com
 VITE_SERVER_URL=http://localhost:3001
 
 # PostHog — analytics (deixe vazio para desabilitar)

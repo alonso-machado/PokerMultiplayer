@@ -5,6 +5,4 @@ server/.env
 *.md
 .git/
 .gitignore
-railway.toml
-railway.json
 vercel.json
