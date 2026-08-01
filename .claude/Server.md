@@ -75,6 +75,23 @@ Ações durante o Torneio".
 **Shared types:** importados com path relativo `../../shared/types`. Nunca duplique
 tipos — qualquer tipo compartilhado entre front e server deve viver em `shared/`.
 
+## Truco
+
+Sistema totalmente paralelo ao Poker — não compartilha `Room`/`PokerGame`, apenas
+o padrão de broadcast/expiry/reconnect. Ver `.claude/Truco.md` para as regras.
+
+- `truco/deck.ts` — baralho de 40 cartas e resolução de manilha (`vira`/`fixed`).
+- `truco/gameEngine.ts` (`TrucoGame`) — máquina de estados de uma partida: vazas,
+  escalada de truco, mão de 11, placar.
+- `trucoRoom.ts` (`TrucoRoom`) — assentos/times, ciclo de mãos, votação de
+  revanche, timeout de turno (`TRUCO_TIMEOUT`, default 60s — auto-joga a carta
+  mais fraca ou "corre" automaticamente de um truco/mão de 11 pendente).
+- `index.ts`: `trucoRooms` é um `Map` separado de `rooms`; roteamento via
+  `session.trucoRoomId` + `currentTrucoRoom()`, espelhando `currentRoom()`.
+- **Identidade:** `TrucoPlayer.id` é o id bruto verificado (igual ao Poker) —
+  nunca compare com o token assinado do cliente (`identity.playerId`) sem antes
+  extrair o id via uma mensagem do servidor (`truco_room_joined.yourId`).
+
 ## Rotas HTTP
 
 | Método | Path | Auth | Descrição |

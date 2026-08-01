@@ -1,0 +1,380 @@
+import { startingChipsFor } from '../../shared/types';
+import { PokerGame } from './poker/gameEngine';
+import { logger } from './logger';
+const EMPTY_TTL = 10 * 60 * 1000;
+const REBUY_TIMEOUT_S = 60;
+const SHOWDOWN_DURATION_MS = Number(process.env.SHOWDOWN_DURATION_MS ?? 4000);
+export class Room {
+    id;
+    name;
+    creatorName;
+    config;
+    startingChips;
+    tournamentId;
+    players = [];
+    game;
+    started = false;
+    expireTimer = null;
+    rebuyTimers = new Map();
+    onExpire;
+    onPlayersEliminated;
+    constructor(id, name, creatorName, config, opts = {}) {
+        this.id = id;
+        this.name = name;
+        this.creatorName = creatorName;
+        this.config = config;
+        this.startingChips = startingChipsFor(config);
+        this.tournamentId = opts.tournamentId;
+        this.onExpire = opts.onExpire;
+        this.onPlayersEliminated = opts.onPlayersEliminated;
+        this.game = new PokerGame(config);
+        if (!opts.tournamentId)
+            this.scheduleExpiry();
+    }
+    // ── Config (for tournament blind updates) ────────────────────────────────
+    updateConfig(config) {
+        this.game.updateConfig(config);
+    }
+    // ── Expiry ────────────────────────────────────────────────────────────────
+    scheduleExpiry() {
+        this.clearExpiry();
+        this.expireTimer = setTimeout(() => {
+            if (this.players.length < 2) {
+                for (const p of this.players)
+                    p.send({ type: 'room_left', reason: 'expired' });
+                this.onExpire?.();
+            }
+        }, EMPTY_TTL);
+    }
+    clearExpiry() {
+        if (this.expireTimer) {
+            clearTimeout(this.expireTimer);
+            this.expireTimer = null;
+        }
+    }
+    // ── Info ──────────────────────────────────────────────────────────────────
+    get playerCount() { return this.players.length; }
+    get isFull() { return this.players.length >= this.config.maxPlayers; }
+    get isStarted() { return this.started; }
+    summary() {
+        return {
+            id: this.id, name: this.name, creatorName: this.creatorName,
+            playerCount: this.players.length, maxPlayers: this.config.maxPlayers,
+            status: this.started ? 'playing' : 'waiting',
+            config: this.config,
+        };
+    }
+    // ── Join / Leave ──────────────────────────────────────────────────────────
+    join(id, name, send, chips) {
+        if (this.isFull)
+            return false;
+        // Cancel pending rebuy timeout if player rejoins
+        this.cancelRebuyTimer(id);
+        this.players.push({ id, name, send, away: false, sittingOut: false });
+        this.game.addPlayer(id, name, chips ?? this.startingChips);
+        send({ type: 'room_joined', roomId: this.id, roomName: this.name, config: this.config });
+        if (this.started) {
+            // Mid-game join: send current table state so the player can watch the hand in progress.
+            // yourCards is empty — they'll receive real cards on the next hand.
+            send({ type: 'game_started' });
+            send({
+                type: 'hand_dealt',
+                yourCards: [],
+                players: this.game.publicPlayers(),
+                tableState: this.game.tableState,
+            });
+        }
+        this.broadcastAll({ type: 'player_list', players: this.game.publicPlayers() });
+        if (this.players.length >= 2) {
+            this.clearExpiry();
+            if (!this.started && !this.tournamentId) {
+                // Lobby: auto-start as soon as the second player sits down
+                setTimeout(() => this.startGame(), 300);
+            }
+            else {
+                // Mid-game rejoin: start next hand if none is running
+                this.tryDealIfReady();
+            }
+        }
+        return true;
+    }
+    leave(playerId, reason = 'leave') {
+        this.cancelRebuyTimer(playerId);
+        const wasPresent = this.players.some(p => p.id === playerId);
+        this.players = this.players.filter(p => p.id !== playerId);
+        this.game.removePlayer(playerId);
+        this.broadcastAll({ type: 'player_list', players: this.game.publicPlayers() });
+        if (this.players.length < 2 && !this.tournamentId)
+            this.scheduleExpiry();
+        if (wasPresent) {
+            logger.info('player_left_room', {
+                'poker.room_id': this.id,
+                'poker.player_id': playerId,
+                'poker.reason': reason,
+                'poker.player_count': this.players.length,
+            });
+        }
+    }
+    // ── Start ─────────────────────────────────────────────────────────────────
+    startGame(requesterId) {
+        if (this.started)
+            return;
+        if (this.activePlayers().length < 2) {
+            if (requesterId)
+                this.sendTo(requesterId, { type: 'error', message: 'Precisa de pelo menos 2 jogadores.' });
+            return;
+        }
+        this.started = true;
+        this.clearExpiry();
+        this.broadcastAll({ type: 'game_started' });
+        this.dealHand();
+    }
+    // ── Away (tournament-only) ────────────────────────────────────────────────
+    setAway(pid) {
+        const rp = this.players.find(p => p.id === pid);
+        if (!rp)
+            return;
+        rp.away = true;
+        const gp = this.game.players.find(p => p.id === pid);
+        if (gp && gp.status === 'active')
+            gp.status = 'away';
+        this.broadcastAll({ type: 'player_list', players: this.game.publicPlayers() });
+        if (this.game.currentPlayer()?.id === pid)
+            setTimeout(() => this.autoFold(pid), 800);
+    }
+    setBack(pid) {
+        const rp = this.players.find(p => p.id === pid);
+        if (!rp)
+            return;
+        rp.away = false;
+        const gp = this.game.players.find(p => p.id === pid);
+        if (gp && gp.status === 'away')
+            gp.status = 'active';
+        this.broadcastAll({ type: 'player_list', players: this.game.publicPlayers() });
+    }
+    autoFold(pid) {
+        if (this.game.currentPlayer()?.id === pid)
+            this.handleAction(pid, 'fold');
+    }
+    // ── Rebuy (lobby-only) ────────────────────────────────────────────────────
+    handleRebuy(pid) {
+        this.cancelRebuyTimer(pid);
+        const rp = this.players.find(p => p.id === pid);
+        if (!rp)
+            return;
+        rp.sittingOut = false;
+        const gp = this.game.players.find(p => p.id === pid);
+        if (gp) {
+            gp.chips = this.startingChips;
+            gp.status = 'waiting';
+        }
+        else
+            this.game.addPlayer(pid, rp.name, this.startingChips);
+        logger.info('player_rebuy', {
+            'poker.room_id': this.id,
+            'poker.player_id': pid,
+            'poker.starting_chips': this.startingChips,
+        });
+        this.broadcastAll({ type: 'player_list', players: this.game.publicPlayers() });
+        // If no hand is running and we now have enough players, start the next hand
+        this.tryDealIfReady();
+    }
+    handleRebuyDecline(pid) {
+        this.cancelRebuyTimer(pid);
+        this.leave(pid, 'rebuy_decline');
+    }
+    startRebuyTimer(pid) {
+        this.cancelRebuyTimer(pid);
+        const timer = setTimeout(() => {
+            // Auto-decline after 60s
+            this.leave(pid, 'rebuy_timeout');
+        }, REBUY_TIMEOUT_S * 1000);
+        this.rebuyTimers.set(pid, timer);
+    }
+    cancelRebuyTimer(pid) {
+        const t = this.rebuyTimers.get(pid);
+        if (t) {
+            clearTimeout(t);
+            this.rebuyTimers.delete(pid);
+        }
+    }
+    // ── Action ────────────────────────────────────────────────────────────────
+    handleAction(pid, action, amount) {
+        // Snapshot community cards BEFORE the action so we can detect new cards dealt
+        const prevCommunityLen = this.game.tableState.communityCards.length;
+        const prevPhase = this.game.tableState.phase;
+        const ok = this.game.applyAction(pid, action, amount);
+        if (!ok) {
+            this.sendTo(pid, { type: 'error', message: 'Ação inválida.' });
+            // Re-send your_turn so the player's UI recovers if it cleared the action panel optimistically
+            const current = this.game.currentPlayer();
+            if (current?.id === pid) {
+                const { actions, callAmount, minRaise } = this.game.validActions(current);
+                this.sendTo(pid, { type: 'your_turn', validActions: actions, minRaise, callAmount });
+            }
+            return;
+        }
+        const newState = this.game.tableState;
+        const newPhase = newState.phase;
+        // Always broadcast the action result (bets, pot, player states)
+        this.broadcastAll({
+            type: 'player_acted', playerId: pid, action, amount,
+            tableState: newState, players: this.game.publicPlayers(),
+        });
+        // If new community cards were dealt, broadcast them regardless of how many phases advanced
+        if (newState.communityCards.length > prevCommunityLen) {
+            const newCards = newState.communityCards.slice(prevCommunityLen);
+            // Determine display phase from total community card count
+            const displayPhase = newState.communityCards.length <= 3 ? 'flop' :
+                newState.communityCards.length === 4 ? 'turn' : 'river';
+            this.broadcastAll({
+                type: 'community_cards',
+                cards: newCards,
+                phase: displayPhase,
+                tableState: newState,
+                players: this.game.publicPlayers(),
+            });
+        }
+        if (this.game.isHandOver())
+            this.endHand();
+        else
+            this.notifyCurrentPlayer();
+    }
+    // ── Hand lifecycle ────────────────────────────────────────────────────────
+    dealHand() {
+        this.game.startHand();
+        // Send each player their private hole cards + full table snapshot
+        for (const rp of this.players) {
+            if (rp.sittingOut)
+                continue;
+            const gp = this.game.players.find(p => p.id === rp.id);
+            if (!gp)
+                continue;
+            rp.send({
+                type: 'hand_dealt',
+                yourCards: gp.holeCards,
+                players: this.game.publicPlayers(),
+                tableState: this.game.tableState,
+            });
+        }
+        this.notifyCurrentPlayer();
+    }
+    endHand() {
+        const result = this.game.resolveShowdown();
+        this.broadcastAll({
+            type: 'showdown',
+            results: result.showdown,
+            tableState: this.game.tableState,
+            players: this.game.publicPlayers(),
+        });
+        this.broadcastAll({
+            type: 'hand_end',
+            winnerId: result.winnerId, winnerName: result.winnerName,
+            amount: result.amount, handName: result.handName,
+        });
+        // Handle 0-chip players. Eliminations from a multi-bust hand are reported
+        // as a single batch — the tournament must mark all of them eliminated
+        // before checking rebalance/final-table/finished, otherwise a table
+        // merge triggered by the first bust would yank the still-mid-loop busted
+        // players out as zombie 0-chip seats.
+        const busted = [];
+        for (const gp of this.game.players) {
+            if (gp.chips > 0)
+                continue;
+            const rp = this.players.find(p => p.id === gp.id);
+            if (!rp || rp.sittingOut)
+                continue;
+            if (this.tournamentId) {
+                rp.sittingOut = true;
+                busted.push({ playerId: gp.id, totalBet: gp.totalBet });
+            }
+            else {
+                // Lobby rebuy: mark sitting out, send prompt, start 60s timer
+                rp.sittingOut = true;
+                rp.send({ type: 'rebuy_prompt', startingChips: this.startingChips, timeoutSeconds: 60 });
+                this.startRebuyTimer(gp.id);
+            }
+        }
+        if (busted.length > 0)
+            this.onPlayersEliminated?.(busted);
+        setTimeout(() => {
+            const eligible = this.players.filter(p => !p.sittingOut);
+            if (eligible.length >= 2)
+                this.dealHand();
+        }, SHOWDOWN_DURATION_MS);
+    }
+    notifyCurrentPlayer() {
+        const current = this.game.currentPlayer();
+        if (!current)
+            return;
+        const rp = this.players.find(p => p.id === current.id);
+        if (rp?.away) {
+            setTimeout(() => this.autoFold(current.id), 800);
+            return;
+        }
+        const { actions, callAmount, minRaise } = this.game.validActions(current);
+        this.sendTo(current.id, { type: 'your_turn', validActions: actions, minRaise, callAmount });
+    }
+    // ── Reconnect ─────────────────────────────────────────────────────────────
+    reconnect(pid, send) {
+        const rp = this.players.find(p => p.id === pid);
+        if (rp)
+            rp.send = send;
+        const gp = this.game.players.find(p => p.id === pid);
+        send({ type: 'game_started' });
+        if (gp) {
+            send({ type: 'hand_dealt', yourCards: gp.holeCards, players: this.game.publicPlayers(), tableState: this.game.tableState });
+        }
+        send({ type: 'player_list', players: this.game.publicPlayers() });
+        // Re-send your_turn if it's this player's turn (they may have missed it while disconnected)
+        const current = this.game.currentPlayer();
+        if (current?.id === pid) {
+            const { actions, callAmount, minRaise } = this.game.validActions(current);
+            send({ type: 'your_turn', validActions: actions, minRaise, callAmount });
+        }
+    }
+    // ── Tournament helpers ────────────────────────────────────────────────────
+    addTournamentPlayer(id, name, send, chips) { this.join(id, name, send, chips); }
+    moveTournamentPlayer(pid) {
+        const gp = this.game.players.find(p => p.id === pid);
+        if (!gp)
+            return null;
+        const r = { name: gp.name, chips: gp.chips };
+        this.leave(pid, 'tournament_move');
+        return r;
+    }
+    getSendFn(pid) { return this.players.find(p => p.id === pid)?.send; }
+    getPlayerChips(pid) { return this.game.players.find(p => p.id === pid)?.chips ?? 0; }
+    /** Chip count to carry over when this whole table is being dissolved
+     *  (e.g. final-table consolidation). If a hand is mid-progress, this
+     *  refunds the player's contribution to the not-yet-resolved pot — once
+     *  resolved (`pot === 0`), `chips` already reflects the payout. */
+    getPlayerMigrationChips(pid) {
+        const gp = this.game.players.find(p => p.id === pid);
+        if (!gp)
+            return 0;
+        return this.game.tableState.pot > 0 ? gp.chips + gp.totalBet : gp.chips;
+    }
+    // ── Internal ──────────────────────────────────────────────────────────────
+    activePlayers() { return this.players.filter(p => !p.sittingOut); }
+    /** Start the next hand if the game is idle and ≥2 players are ready. */
+    tryDealIfReady() {
+        if (!this.started)
+            return;
+        const phase = this.game.tableState.phase;
+        if (phase !== 'waiting' && !this.game.isHandOver())
+            return;
+        const eligible = this.players.filter(p => !p.sittingOut);
+        if (eligible.length >= 2)
+            setTimeout(() => this.dealHand(), 1500);
+    }
+    sendTo(pid, msg) { this.players.find(p => p.id === pid)?.send(msg); }
+    broadcastAll(msg) { for (const p of this.players)
+        p.send(msg); }
+    destroy() {
+        this.clearExpiry();
+        for (const t of this.rebuyTimers.values())
+            clearTimeout(t);
+        this.rebuyTimers.clear();
+    }
+}

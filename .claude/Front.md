@@ -112,6 +112,28 @@ VITE_POSTHOG_HOST=https://us.i.posthog.com
 > Todas as vars **devem** começar com `VITE_` para serem acessíveis no bundle.
 > `.env.local` está no `.gitignore` — nunca commite secrets.
 
+## Truco
+
+Aba separada (`♠ Poker` vs `🂡 Truco` no seletor de jogo, com `Mesas`/`Torneio`
+como sub-abas apenas dentro de Poker). Estado isolado do Poker via
+`useTrucoGame` (`hooks/useTrucoGame.ts`), um `useReducer` que recebe qualquer
+`ServerMessage` cujo `type` comece com `truco_` (roteado no `default:` do
+switch principal do `App.tsx` — não polui os ~24 cases do Poker).
+
+- `TrucoLobby.tsx` — criar/listar mesas (modo 1x1/2x2, variante vira/fixa).
+- `TrucoTable.tsx` — mesa: placar, manilhas em ordem de força (com tooltip
+  explicando a vira), oponentes (nome + brilho/contagem regressiva no turno
+  deles), minha mão + nome + botão de truco/responder logo abaixo, overlays de
+  mão de 11 e fim de partida/revanche.
+- `TrucoGuide.tsx` — painel de regras (reutiliza o shell CSS `.hand-guide-*`
+  do `HandGuide.tsx`, mutuamente exclusivos na renderização).
+
+**Identidade:** `identity.playerId` é o **token assinado** (`id.assinatura`),
+mas `TrucoPlayer.id` do servidor é o **id bruto**. Comparações `player.id ===
+myId` só funcionam com o id bruto — por isso `trucoState.myId` é preenchido a
+partir de `truco_room_joined.yourId` (não de `identity.playerId`) e é isso que
+deve ser passado como `myId` para `TrucoTable`.
+
 ## Observabilidade (Front)
 
 Observabilidade client-side é feita via **PostHog**:

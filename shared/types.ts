@@ -128,6 +128,8 @@ export type ClientMessage =
   | { type: 'unregister_tournament' }
   | { type: 'set_away' }   // tournament-only
   | { type: 'set_back' }   // tournament-only
+  // Truco (see below)
+  | TrucoClientMessage
 
 // ─── WebSocket: Server → Client ───────────────────────────────────────────────
 
@@ -180,6 +182,8 @@ export type ServerMessage =
   | { type: 'identity'; token: string }
   // ── Generic ────────────────────────────────────────────────────────────────
   | { type: 'error'; message: string }
+  // ── Truco (see below) ─────────────────────────────────────────────────────
+  | TrucoServerMessage
 
 export interface ShowdownResult {
   playerId: string
@@ -189,3 +193,108 @@ export interface ShowdownResult {
   handName: string
   won: number
 }
+
+// ─── Truco ──────────────────────────────────────────────────────────────────
+// See .claude/Truco.md for the full rules this section's types model.
+
+export type TrucoMode = '1x1' | '2x2'
+export type TrucoManilhaVariant = 'vira' | 'fixed'   // vira = Paulista, fixed = Mineiro
+
+export interface TrucoRoomConfig {
+  mode: TrucoMode
+  manilhaVariant: TrucoManilhaVariant
+}
+
+export interface TrucoRoomSummary {
+  id: string
+  name: string
+  creatorName: string
+  playerCount: number
+  maxPlayers: number   // 2 (1x1) or 4 (2x2)
+  status: RoomStatus
+  config: TrucoRoomConfig
+}
+
+export type TrucoPlayerStatus = 'waiting' | 'active' | 'mao_de_onze_pending' | 'disconnected'
+
+export interface TrucoPlayer {
+  id: string
+  name: string
+  seatIndex: number
+  teamIndex: 0 | 1
+  status: TrucoPlayerStatus
+  matchWins: number
+}
+
+export type TrucoCallLevel = 1 | 3 | 6 | 9 | 12
+export type TrucoPhase = 'waiting' | 'mao_de_onze_decision' | 'playing' | 'hand_end' | 'match_end'
+
+export interface TrucoVazaCard {
+  playerId: string
+  card: Card
+}
+
+export interface TrucoTableState {
+  phase: TrucoPhase
+  vira: Card | null              // null in 'fixed' variant
+  manilhaCards: Card[]           // the 4 cards that count as manilha this hand
+  vaza: 1 | 2 | 3
+  vazaCardsPlayed: TrucoVazaCard[]
+  vazaWinners: (0 | 1 | null)[]  // one entry per vaza resolved so far (0-3); null = that vaza tied
+  stake: TrucoCallLevel
+  pendingStake: TrucoCallLevel | null  // proposed level awaiting accept/decline/raise, if any
+  stakeCalledByTeam: 0 | 1 | null
+  awaitingResponseFromTeam: 0 | 1 | null
+  dealerSeat: number
+  leaderSeat: number             // holds "a mão" — leads the current vaza
+  currentSeat: number            // whose turn to act (play or respond)
+  scores: [number, number]
+}
+
+// ─── WebSocket: Client → Server (Truco) ────────────────────────────────────
+
+export type TrucoClientMessage =
+  | { type: 'truco_list_rooms' }
+  | { type: 'truco_create_room'; roomName: string; config: TrucoRoomConfig }
+  | { type: 'truco_join_room'; roomId: string }
+  | { type: 'truco_leave_room' }
+  | { type: 'truco_play_card'; card: Card }
+  | { type: 'truco_call_truco' }
+  | { type: 'truco_respond'; accept: boolean }
+  | { type: 'truco_mao_de_onze_decision'; accept: boolean }
+  | { type: 'truco_rematch_vote'; accept: boolean }
+
+// ─── WebSocket: Server → Client (Truco) ────────────────────────────────────
+
+export type TrucoServerMessage =
+  | { type: 'truco_room_list'; rooms: TrucoRoomSummary[] }
+  | { type: 'truco_room_joined'; roomId: string; roomName: string; config: TrucoRoomConfig; yourId: string }
+  | { type: 'truco_room_left'; reason?: 'manual' | 'expired' | 'abandoned' | 'rematch_declined' }
+  | { type: 'truco_room_error'; message: string }
+  | { type: 'truco_player_list'; players: TrucoPlayer[] }
+  | { type: 'truco_game_started' }
+  /** Private — sent only to the receiving player at the start of each hand */
+  | { type: 'truco_hand_dealt'; yourCards: Card[]; players: TrucoPlayer[]; tableState: TrucoTableState }
+  /** Broadcast — vira card revealed ('vira' variant only) */
+  | { type: 'truco_vira_revealed'; vira: Card; manilhaCards: Card[] }
+  /** Private — sent to the player whose turn it is */
+  | { type: 'truco_your_turn'; canCallTruco: boolean; canRespond: boolean; timeoutSeconds: number }
+  /** Broadcast — a card was played */
+  | { type: 'truco_card_played'; playerId: string; card: Card; tableState: TrucoTableState }
+  /** Broadcast — a vaza was resolved */
+  | { type: 'truco_vaza_result'; winnerTeam: 0 | 1 | null; tableState: TrucoTableState }
+  /** Broadcast — someone called truco/seis/nove/doze */
+  | { type: 'truco_call_made'; playerId: string; level: TrucoCallLevel; tableState: TrucoTableState }
+  /** Broadcast — a team accepted or ran from a pending call */
+  | { type: 'truco_call_responded'; playerId: string; accept: boolean; tableState: TrucoTableState }
+  /**
+   * Private — sent only to players on the affected team(s) at mão de 11/ferro.
+   * teamCards is that recipient's team's combined hand (self + partner in 2x2).
+   */
+  | { type: 'truco_mao_de_onze_prompt'; teamCards: Card[]; isFerro: boolean; timeoutSeconds: number }
+  /** Broadcast — hand ended, points awarded */
+  | { type: 'truco_hand_end'; winnerTeam: 0 | 1 | null; points: number; reason: 'vazas' | 'corri' | 'mao_de_onze_run'; tableState: TrucoTableState }
+  /** Broadcast — match ended (a team hit 12) */
+  | { type: 'truco_match_end'; winnerTeam: 0 | 1; scores: [number, number]; matchWins: Record<string, number> }
+  /** Broadcast — rematch vote progress */
+  | { type: 'truco_rematch_status'; accepted: string[]; pending: string[] }

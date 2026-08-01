@@ -1,7 +1,11 @@
-import type { ClientMessage, PlayerAction, RoomConfig } from '../../shared/types'
+import type { Card, ClientMessage, PlayerAction, Rank, RoomConfig, Suit, TrucoRoomConfig } from '../../shared/types'
 
 const MAX_PAYLOAD_BYTES = 512
 const VALID_ACTIONS     = new Set<string>(['fold', 'check', 'call', 'raise', 'all-in'])
+const VALID_SUITS       = new Set<string>(['spades', 'hearts', 'diamonds', 'clubs'])
+const VALID_RANKS       = new Set<string>(['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'])
+const VALID_TRUCO_MODES = new Set<string>(['1x1', '2x2'])
+const VALID_MANILHA_VARIANTS = new Set<string>(['vira', 'fixed'])
 
 function isString(v: unknown): v is string   { return typeof v === 'string' }
 // Signed token: 64-char playerId + '.' + ~43-char base64url HMAC = ~108 chars. Cap at 128.
@@ -26,6 +30,24 @@ function parseConfig(v: unknown): RoomConfig | null {
   const maxPlayers = safeInt(c.maxPlayers, 2, 6)
   if (smallBlind === null || bigBlind === null || ante === null || maxPlayers === null) return null
   return { smallBlind, bigBlind, ante, maxPlayers }
+}
+
+function isBool(v: unknown): v is boolean { return typeof v === 'boolean' }
+
+function parseCard(v: unknown): Card | null {
+  if (typeof v !== 'object' || v === null) return null
+  const c = v as Record<string, unknown>
+  if (!isString(c.suit) || !VALID_SUITS.has(c.suit)) return null
+  if (!isString(c.rank) || !VALID_RANKS.has(c.rank)) return null
+  return { suit: c.suit as Suit, rank: c.rank as Rank }
+}
+
+function parseTrucoConfig(v: unknown): TrucoRoomConfig | null {
+  if (typeof v !== 'object' || v === null) return null
+  const c = v as Record<string, unknown>
+  if (!isString(c.mode) || !VALID_TRUCO_MODES.has(c.mode)) return null
+  if (!isString(c.manilhaVariant) || !VALID_MANILHA_VARIANTS.has(c.manilhaVariant)) return null
+  return { mode: c.mode as TrucoRoomConfig['mode'], manilhaVariant: c.manilhaVariant as TrucoRoomConfig['manilhaVariant'] }
 }
 
 /**
@@ -88,6 +110,40 @@ export function parseClientMessage(raw: unknown): ClientMessage | null {
       if (m.amount !== undefined && amount === null) return null
       return { type: 'player_action', action: m.action as PlayerAction, amount: amount ?? undefined }
     }
+
+    // ── Truco ────────────────────────────────────────────────────────────
+    case 'truco_list_rooms': return { type: 'truco_list_rooms' }
+    case 'truco_leave_room': return { type: 'truco_leave_room' }
+    case 'truco_call_truco': return { type: 'truco_call_truco' }
+
+    case 'truco_create_room': {
+      if (!isSafeRoomName(m.roomName)) return null
+      const config = parseTrucoConfig(m.config)
+      if (!config) return null
+      return { type: 'truco_create_room', roomName: m.roomName as string, config }
+    }
+
+    case 'truco_join_room':
+      if (!isSafeId(m.roomId)) return null
+      return { type: 'truco_join_room', roomId: m.roomId as string }
+
+    case 'truco_play_card': {
+      const card = parseCard(m.card)
+      if (!card) return null
+      return { type: 'truco_play_card', card }
+    }
+
+    case 'truco_respond':
+      if (!isBool(m.accept)) return null
+      return { type: 'truco_respond', accept: m.accept }
+
+    case 'truco_mao_de_onze_decision':
+      if (!isBool(m.accept)) return null
+      return { type: 'truco_mao_de_onze_decision', accept: m.accept }
+
+    case 'truco_rematch_vote':
+      if (!isBool(m.accept)) return null
+      return { type: 'truco_rematch_vote', accept: m.accept }
 
     default:
       return null

@@ -11,12 +11,14 @@ import { logger } from './logger'
 
 const IS_DEV = process.env.NODE_ENV !== 'production'
 import { Room } from './room'
+import { TrucoRoom } from './trucoRoom'
 import { Tournament } from './tournament'
 import { adminRouter, publicTournamentHandler } from './admin'
 
 const MAX_LOBBY_ROOMS = Number(process.env.MAX_LOBBIES ?? 30)
 
 const rooms = new Map<string, Room>()
+const trucoRooms = new Map<string, TrucoRoom>()
 let activeTournament: Tournament | null = null
 
 // ── Persistent player sessions (survive WS reconnect) ─────────────────────────
@@ -24,6 +26,7 @@ interface PersistentSession {
   playerId: string
   name: string
   roomId: string | null
+  trucoRoomId: string | null
   tournamentToken: string | null
 }
 const playerSessions = new Map<string, PersistentSession>()
@@ -33,6 +36,7 @@ interface Session {
   playerId: string
   name: string
   roomId: string | null
+  trucoRoomId: string | null
   tournamentToken: string | null
 }
 
@@ -66,6 +70,10 @@ function currentRoom(session: Session): Room | undefined {
     if (tableId) return rooms.get(tableId)
   }
   return session.roomId ? rooms.get(session.roomId) : undefined
+}
+
+function currentTrucoRoom(session: Session): TrucoRoom | undefined {
+  return session.trucoRoomId ? trucoRooms.get(session.trucoRoomId) : undefined
 }
 
 // ── Admin callbacks ───────────────────────────────────────────────────────────
@@ -158,7 +166,7 @@ const server = Bun.serve<Session>({
 
     if (pathname === '/ws') {
       const ok = server.upgrade(req, {
-        data: { playerId: '', name: 'Jogador', roomId: null, tournamentToken: null } as Session,
+        data: { playerId: '', name: 'Jogador', roomId: null, trucoRoomId: null, tournamentToken: null } as Session,
       })
       return ok ? undefined : new Response('Upgrade failed', { status: 400 })
     }
@@ -189,6 +197,7 @@ const server = Bun.serve<Session>({
       // until they reload (new `hello` -> fresh tournament_info send).
       ws.subscribe('lobby')
       send(ws, { type: 'room_list', rooms: lobbyRoomList() })
+      send(ws, { type: 'truco_room_list', rooms: trucoRoomList() })
       send(ws, { type: 'tournament_info', tournament: activeTournament?.info() ?? null })
     },
 
@@ -224,11 +233,21 @@ const server = Bun.serve<Session>({
               existing.roomId = null
             }
           }
+          // Reconnect to Truco room
+          if (existing.trucoRoomId) {
+            const trucoRoom = trucoRooms.get(existing.trucoRoomId)
+            if (trucoRoom) {
+              session.trucoRoomId = existing.trucoRoomId
+              trucoRoom.reconnect(pid, emit)
+            } else {
+              existing.trucoRoomId = null
+            }
+          }
           // Update send fn
           existing.name = session.name
           session.tournamentToken = session.tournamentToken ?? existing.tournamentToken
         } else {
-          playerSessions.set(pid, { playerId: pid, name: session.name, roomId: null, tournamentToken: session.tournamentToken })
+          playerSessions.set(pid, { playerId: pid, name: session.name, roomId: null, trucoRoomId: null, tournamentToken: session.tournamentToken })
         }
 
         // Restore tournament registration
@@ -352,6 +371,70 @@ const server = Bun.serve<Session>({
           break
         }
 
+        // ── Truco ────────────────────────────────────────────────────────────
+        case 'truco_list_rooms': emit({ type: 'truco_room_list', rooms: trucoRoomList() }); break
+
+        case 'truco_create_room': {
+          const room = new TrucoRoom(generateId(), msg.roomName.trim().slice(0, 40) || 'Mesa', session.name, msg.config, {
+            onExpire: () => { trucoRooms.delete(room.id); broadcastTrucoRoomList() },
+            onDissolve: () => { trucoRooms.delete(room.id); broadcastTrucoRoomList() },
+          })
+          trucoRooms.set(room.id, room)
+          room.join(session.playerId, session.name, emit)   // creator auto-joins
+          session.trucoRoomId = room.id
+          setPersistentTrucoRoom(session.playerId, room.id)
+          broadcastTrucoRoomList()
+          break
+        }
+
+        case 'truco_join_room': {
+          const room = trucoRooms.get(msg.roomId)
+          if (!room)       { emit({ type: 'truco_room_error', message: 'Mesa não encontrada.' }); break }
+          if (room.isFull) { emit({ type: 'truco_room_error', message: 'Mesa cheia.' }); break }
+          if (room.isStarted) { emit({ type: 'truco_room_error', message: 'Partida em andamento.' }); break }
+          if (session.trucoRoomId) leaveTrucoRoom(ws)
+          room.join(session.playerId, session.name, emit)
+          session.trucoRoomId = room.id
+          setPersistentTrucoRoom(session.playerId, room.id)
+          broadcastTrucoRoomList()
+          break
+        }
+
+        case 'truco_leave_room':
+          leaveTrucoRoom(ws)
+          emit({ type: 'truco_room_left', reason: 'manual' })
+          break
+
+        case 'truco_play_card': {
+          const room = currentTrucoRoom(session)
+          room?.handlePlayCard(session.playerId, msg.card)
+          break
+        }
+
+        case 'truco_call_truco': {
+          const room = currentTrucoRoom(session)
+          room?.handleCallTruco(session.playerId)
+          break
+        }
+
+        case 'truco_respond': {
+          const room = currentTrucoRoom(session)
+          room?.handleRespond(session.playerId, msg.accept)
+          break
+        }
+
+        case 'truco_mao_de_onze_decision': {
+          const room = currentTrucoRoom(session)
+          room?.handleMaoDeOnzeDecision(session.playerId, msg.accept)
+          break
+        }
+
+        case 'truco_rematch_vote': {
+          const room = currentTrucoRoom(session)
+          room?.handleRematchVote(session.playerId, msg.accept)
+          break
+        }
+
         // ── Tournament registration ─────────────────────────────────────────
         case 'register_tournament': {
           if (!activeTournament) { emit({ type: 'tournament_error', message: 'Nenhum torneio disponível.' }); break }
@@ -405,6 +488,24 @@ function setPersistentRoom(pid: string, roomId: string | null): void {
   if (ps) ps.roomId = roomId
 }
 
+function leaveTrucoRoom(ws: { data: Session }): void {
+  const { playerId, trucoRoomId } = ws.data
+  if (!trucoRoomId) return
+  const room = trucoRooms.get(trucoRoomId)
+  if (room) {
+    room.leave(playerId)
+    if (room.playerCount === 0) { room.destroy(); trucoRooms.delete(trucoRoomId) }
+  }
+  ws.data.trucoRoomId = null
+  setPersistentTrucoRoom(playerId, null)
+  broadcastTrucoRoomList()
+}
+
+function setPersistentTrucoRoom(pid: string, trucoRoomId: string | null): void {
+  const ps = playerSessions.get(pid)
+  if (ps) ps.trucoRoomId = trucoRoomId
+}
+
 function setPersistentToken(pid: string, token: string | null): void {
   const ps = playerSessions.get(pid)
   if (ps) ps.tournamentToken = token
@@ -412,9 +513,13 @@ function setPersistentToken(pid: string, token: string | null): void {
 
 function lobbyRoomList()  { return [...rooms.values()].filter(r => !r.tournamentId).map(r => r.summary()) }
 function lobbyRoomCount() { return [...rooms.values()].filter(r => !r.tournamentId).length }
+function trucoRoomList()  { return [...trucoRooms.values()].map(r => r.summary()) }
 
 function broadcastRoomList(): void {
   server.publish('lobby', JSON.stringify({ type: 'room_list', rooms: lobbyRoomList() } satisfies ServerMessage))
+}
+function broadcastTrucoRoomList(): void {
+  server.publish('lobby', JSON.stringify({ type: 'truco_room_list', rooms: trucoRoomList() } satisfies ServerMessage))
 }
 function broadcastTournamentInfo(): void {
   server.publish('lobby', JSON.stringify({ type: 'tournament_info', tournament: activeTournament?.info() ?? null } satisfies ServerMessage))

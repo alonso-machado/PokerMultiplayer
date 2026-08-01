@@ -6,16 +6,21 @@ import type {
   TournamentInfo, TournamentPlayer, TournamentStatus,
 } from '../../shared/types'
 import { useSocket } from './hooks/useSocket'
+import { useTrucoGame } from './hooks/useTrucoGame'
 import { getOrCreateIdentity, saveName, saveIdentityToken, saveTournamentToken, clearTournamentToken } from './hooks/usePlayerToken'
 import { Lobby } from './components/Lobby'
 import { TournamentTab } from './components/TournamentTab'
 import { PokerTable } from './components/PokerTable'
+import { TrucoLobby } from './components/TrucoLobby'
+import { TrucoTable } from './components/TrucoTable'
 import { HandGuide } from './components/HandGuide'
 import { AdminPage } from './pages/AdminPage'
+import type { TrucoRoomSummary } from '../../shared/types'
 
 interface TurnState { validActions: PlayerAction[]; callAmount: number; minRaise: number }
 interface ShowdownEntry { playerId: string; playerName: string; cards: Card[]; bestCards: Card[]; handName: string; won: number }
-type Tab = 'rooms' | 'tournament'
+type GameGroup = 'poker' | 'truco'
+type PokerTab = 'rooms' | 'tournament'
 
 const identity = getOrCreateIdentity()
 
@@ -24,8 +29,11 @@ function App() {
 
   const posthog = usePostHog()
   const [myName, setMyNameState] = useState(identity.name)
-  const [activeTab, setActiveTab] = useState<Tab>('rooms')
+  const [activeGame, setActiveGame] = useState<GameGroup>('poker')
+  const [activePokerTab, setActivePokerTab] = useState<PokerTab>('rooms')
   const [rooms, setRooms]         = useState<RoomSummary[]>([])
+  const [trucoRooms, setTrucoRooms] = useState<TrucoRoomSummary[]>([])
+  const { trucoState, handleTrucoMessage } = useTrucoGame(identity.playerId)
 
   // Tournament
   const [tournamentInfo,       setTournamentInfo]       = useState<TournamentInfo | null>(null)
@@ -63,6 +71,7 @@ function App() {
   const handleMessage = useCallback((msg: ServerMessage) => {
     switch (msg.type) {
       case 'room_list':       setRooms(msg.rooms); break
+      case 'truco_room_list': setTrucoRooms(msg.rooms); break
       case 'tournament_info':
         // A brand-new tournament (different id) means our previous registration
         // token is stale — let the player register again for this one.
@@ -154,7 +163,7 @@ function App() {
       case 'tournament_eliminated':
         setTournamentEliminated({ rank: msg.rank, total: msg.totalPlayers })
         setRoomId(null); setTurn(null); setMyCards([]); setTableState(null)
-        setInTournamentRoom(false); setActiveTab('tournament')
+        setInTournamentRoom(false); setActiveGame('poker'); setActivePokerTab('tournament')
         posthog?.capture('tournament_eliminated', { rank: msg.rank, total_players: msg.totalPlayers })
         break
       case 'tournament_finished':
@@ -179,6 +188,10 @@ function App() {
         saveIdentityToken(msg.token)
         identity.playerId = msg.token
         break
+
+      default:
+        if (msg.type.startsWith('truco_')) handleTrucoMessage(msg)
+        break
     }
   }, [])
 
@@ -201,6 +214,31 @@ function App() {
   }
 
   // ── Routing ───────────────────────────────────────────────────────────────
+
+  if (trucoState.roomId && trucoState.config) {
+    return (
+      <TrucoTable
+        myId={trucoState.myId}
+        roomName={trucoState.roomName}
+        config={trucoState.config}
+        players={trucoState.players}
+        tableState={trucoState.tableState}
+        myCards={trucoState.myCards}
+        isStarted={trucoState.isStarted}
+        turnDeadline={trucoState.turnDeadline}
+        maoDeOnzePrompt={trucoState.maoDeOnzePrompt}
+        handEnd={trucoState.handEnd}
+        matchEnd={trucoState.matchEnd}
+        rematch={trucoState.rematch}
+        onLeave={() => send({ type: 'truco_leave_room' })}
+        onPlayCard={(card) => send({ type: 'truco_play_card', card })}
+        onCallTruco={() => send({ type: 'truco_call_truco' })}
+        onRespond={(accept) => send({ type: 'truco_respond', accept })}
+        onMaoDeOnzeDecision={(accept) => send({ type: 'truco_mao_de_onze_decision', accept })}
+        onRematchVote={(accept) => send({ type: 'truco_rematch_vote', accept })}
+      />
+    )
+  }
 
   if (roomId && roomConfig) {
     return (
@@ -237,34 +275,52 @@ function App() {
   return (
     <>
     <div className="lobby">
-      <h1>♠ Texas Hold'em ♥</h1>
-      <p className="subtitle">Poker multiplayer em tempo real</p>
+      <h1>{activeGame === 'poker' ? "♠ Texas Hold'em ♥" : '🂡 Truco'}</h1>
+      <p className="subtitle">{activeGame === 'poker' ? 'Poker multiplayer em tempo real' : 'Truco multiplayer — Paulista ou Mineiro'}</p>
       <NameRow name={myName} onSave={setMyName} />
-      <div className="tabs">
-        <button className={`tab${activeTab === 'rooms' ? ' active' : ''}`} onClick={() => setActiveTab('rooms')}>🃏 Mesas</button>
-        <button className={`tab${activeTab === 'tournament' ? ' active' : ''}`} onClick={() => setActiveTab('tournament')}>🏆 Torneio</button>
+
+      <div className="tabs game-tabs">
+        <button className={`tab${activeGame === 'poker' ? ' active' : ''}`} onClick={() => setActiveGame('poker')}>♠ Poker</button>
+        <button className={`tab${activeGame === 'truco' ? ' active' : ''}`} onClick={() => setActiveGame('truco')}>🂡 Truco</button>
       </div>
-      {activeTab === 'rooms' && (
-        <Lobby
-          rooms={rooms}
-          onCreateRoom={(name, cfg) => send({ type: 'create_room', roomName: name, config: cfg })}
-          onJoinRoom={(id) => send({ type: 'join_room', roomId: id })}
-        />
+
+      {activeGame === 'poker' && (
+        <>
+          <div className="tabs">
+            <button className={`tab${activePokerTab === 'rooms' ? ' active' : ''}`} onClick={() => setActivePokerTab('rooms')}>🃏 Mesas</button>
+            <button className={`tab${activePokerTab === 'tournament' ? ' active' : ''}`} onClick={() => setActivePokerTab('tournament')}>🏆 Torneio</button>
+          </div>
+          {activePokerTab === 'rooms' && (
+            <Lobby
+              rooms={rooms}
+              onCreateRoom={(name, cfg) => send({ type: 'create_room', roomName: name, config: cfg })}
+              onJoinRoom={(id) => send({ type: 'join_room', roomId: id })}
+            />
+          )}
+          {activePokerTab === 'tournament' && (
+            <TournamentTab
+              tournament={tournamentInfo}
+              myToken={myTournamentToken}
+              ranking={tournamentRanking}
+              eliminated={tournamentEliminated}
+              winnerName={tournamentWinner}
+              onRegister={() => { send({ type: 'register_tournament' }) }}
+              onUnregister={() => {
+                send({ type: 'unregister_tournament' })
+                posthog?.capture('tournament_unregistered')
+                setMyTournamentToken(null); clearTournamentToken()
+              }}
+              onDismissElimination={() => setTournamentEliminated(null)}
+            />
+          )}
+        </>
       )}
-      {activeTab === 'tournament' && (
-        <TournamentTab
-          tournament={tournamentInfo}
-          myToken={myTournamentToken}
-          ranking={tournamentRanking}
-          eliminated={tournamentEliminated}
-          winnerName={tournamentWinner}
-          onRegister={() => { send({ type: 'register_tournament' }) }}
-          onUnregister={() => {
-            send({ type: 'unregister_tournament' })
-            posthog?.capture('tournament_unregistered')
-            setMyTournamentToken(null); clearTournamentToken()
-          }}
-          onDismissElimination={() => setTournamentEliminated(null)}
+
+      {activeGame === 'truco' && (
+        <TrucoLobby
+          rooms={trucoRooms}
+          onCreateRoom={(name, cfg) => send({ type: 'truco_create_room', roomName: name, config: cfg })}
+          onJoinRoom={(id) => send({ type: 'truco_join_room', roomId: id })}
         />
       )}
     </div>
