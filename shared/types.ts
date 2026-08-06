@@ -132,6 +132,8 @@ export type ClientMessage =
   | TrucoClientMessage
   // Truco Gaúcho (see below)
   | GauchoClientMessage
+  // Canastra / Buraco (see below)
+  | CanastraClientMessage
 
 // ─── WebSocket: Server → Client ───────────────────────────────────────────────
 
@@ -188,6 +190,8 @@ export type ServerMessage =
   | TrucoServerMessage
   // ── Truco Gaúcho (see below) ──────────────────────────────────────────────
   | GauchoServerMessage
+  // ── Canastra / Buraco (see below) ─────────────────────────────────────────
+  | CanastraServerMessage
 
 export interface ShowdownResult {
   playerId: string
@@ -455,3 +459,135 @@ export type GauchoServerMessage =
   | { type: 'gaucho_match_end'; winnerTeam: 0 | 1; scores: [number, number]; matchWins: Record<string, number> }
   /** Broadcast — rematch vote progress */
   | { type: 'gaucho_rematch_status'; accepted: string[]; pending: string[] }
+
+// ─── Canastra / Buraco ──────────────────────────────────────────────────────
+// See .claude/Canastra.md for the full rules this section's types model.
+// Separate game from Poker/Truco/Gaúcho above — no shared runtime state.
+// Uses its own card shape (CanastraCard) instead of `Card`: the 108-card
+// double deck has duplicate suit+rank combinations and jokers, so each card
+// needs a stable unique `id` and `suit`/`rank` become nullable for jokers.
+
+export type CanastraMode = '1x1' | '2x2'
+
+export interface CanastraCard {
+  id: string          // unique per physical card — 2 decks duplicate suit+rank
+  suit: Suit | null   // null when isJoker
+  rank: Rank | null   // null when isJoker
+  isJoker: boolean
+}
+
+export interface CanastraRoomConfig {
+  mode: CanastraMode
+}
+
+export interface CanastraRoomSummary {
+  id: string
+  name: string
+  creatorName: string
+  playerCount: number
+  maxPlayers: number   // 2 (1x1) or 4 (2x2)
+  status: RoomStatus
+  config: CanastraRoomConfig
+}
+
+export type CanastraPlayerStatus = 'waiting' | 'active' | 'disconnected'
+
+export interface CanastraPlayer {
+  id: string
+  name: string
+  seatIndex: number
+  teamIndex: 0 | 1
+  status: CanastraPlayerStatus
+  handCount: number   // card count only — actual cards are private, see CanastraCard messages
+  matchWins: number
+}
+
+export type CanastraMeldKind = 'sequence' | 'group'
+
+export interface CanastraMeld {
+  id: string
+  ownerTeam: 0 | 1
+  kind: CanastraMeldKind
+  cards: CanastraCard[]
+  isCanastra: boolean   // true once the meld has 7+ cards
+  isClean: boolean      // meaningful only when isCanastra — no wildcard used
+}
+
+export type CanastraPhase = 'waiting' | 'playing' | 'round_end'
+/** Within `playing`: `draw` = must draw from stock or take the discard pile
+ *  before anything else; `act` = has drawn, may lay/add melds any number of
+ *  times, then must discard to end the turn. */
+export type CanastraTurnStage = 'draw' | 'act'
+
+export interface CanastraTeamState {
+  mortoTaken: boolean
+  mortoCount: number   // 11 until taken, 0 after — actual cards are private until merged into a hand
+  melds: CanastraMeld[]
+}
+
+export interface CanastraTableState {
+  phase: CanastraPhase
+  turnStage: CanastraTurnStage
+  stockCount: number
+  discardPile: CanastraCard[]   // face-up, visible to everyone; last element = top of the pile
+  teams: [CanastraTeamState, CanastraTeamState]
+  currentSeat: number
+  scores: [number, number] | null   // set only once phase === 'round_end'
+}
+
+export interface CanastraScoreBreakdown {
+  meldPoints: number
+  handPenalty: number    // negative — value of cards left in hand
+  mortoPenalty: number   // -100 if the team never took its morto, else 0
+  battingBonus: number   // +100 for the team that ended the round, else 0
+  total: number
+}
+
+// ─── WebSocket: Client → Server (Canastra) ─────────────────────────────────
+
+/** How the just-picked-up top discard card is used — required to legally
+ *  take the discard pile (see .claude/Canastra.md → "Comprar o lixo"). */
+export type CanastraMeldPlan =
+  | { kind: 'new'; cardIds: string[] }               // new meld — includes the top discard card's id
+  | { kind: 'append'; meldId: string; cardId: string } // cardId = the top discard card's id
+
+export type CanastraClientMessage =
+  | { type: 'canastra_list_rooms' }
+  | { type: 'canastra_create_room'; roomName: string; config: CanastraRoomConfig }
+  | { type: 'canastra_join_room'; roomId: string }
+  | { type: 'canastra_leave_room' }
+  | { type: 'canastra_draw_stock' }
+  | { type: 'canastra_take_discard'; meldPlan: CanastraMeldPlan }
+  | { type: 'canastra_lay_meld'; cardIds: string[] }
+  | { type: 'canastra_add_to_meld'; meldId: string; cardIds: string[] }
+  | { type: 'canastra_discard'; cardId: string }
+  | { type: 'canastra_rematch_vote'; accept: boolean }
+
+// ─── WebSocket: Server → Client (Canastra) ─────────────────────────────────
+
+export type CanastraServerMessage =
+  | { type: 'canastra_room_list'; rooms: CanastraRoomSummary[] }
+  | { type: 'canastra_room_joined'; roomId: string; roomName: string; config: CanastraRoomConfig; yourId: string }
+  | { type: 'canastra_room_left'; reason?: 'manual' | 'expired' | 'abandoned' | 'rematch_declined' }
+  | { type: 'canastra_room_error'; message: string }
+  | { type: 'canastra_player_list'; players: CanastraPlayer[] }
+  | { type: 'canastra_game_started' }
+  /** Private — sent only to the receiving player at the start of the round */
+  | { type: 'canastra_hand_dealt'; yourCards: CanastraCard[]; players: CanastraPlayer[]; tableState: CanastraTableState }
+  /** Private — sent to the player whose turn it is */
+  | { type: 'canastra_your_turn'; canTakeDiscard: boolean; timeoutSeconds: number }
+  /** Broadcast — public table state changed (draw, meld, add, discard, morto pickup) */
+  | { type: 'canastra_state_update'; tableState: CanastraTableState; players: CanastraPlayer[] }
+  /** Private — sent only to the player(s) whose hand changed by this action */
+  | { type: 'canastra_hand_update'; cards: CanastraCard[] }
+  /** Broadcast — the round (= the whole match) ended, via batida or monte exhausted */
+  | {
+      type: 'canastra_round_end'
+      winnerTeam: 0 | 1 | null   // null on a tie
+      scores: [number, number]
+      breakdown: [CanastraScoreBreakdown, CanastraScoreBreakdown]
+      matchWins: Record<string, number>
+      tableState: CanastraTableState
+    }
+  /** Broadcast — rematch vote progress */
+  | { type: 'canastra_rematch_status'; accepted: string[]; pending: string[] }

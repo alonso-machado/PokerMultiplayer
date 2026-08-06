@@ -134,6 +134,28 @@ myId` só funcionam com o id bruto — por isso `trucoState.myId` é preenchido 
 partir de `truco_room_joined.yourId` (não de `identity.playerId`) e é isso que
 deve ser passado como `myId` para `TrucoTable`.
 
+## Canastra / Buraco
+
+Aba separada (`🎴 Canastra` no seletor de jogo). Estado isolado via
+`useCanastraGame` (`hooks/useCanastraGame.ts`), um `useReducer` que recebe
+qualquer `ServerMessage` cujo `type` comece com `canastra_` (roteado no
+`default:` do switch principal do `App.tsx`, mesmo padrão do Truco/Gaúcho).
+
+- `CanastraLobby.tsx` — criar/listar mesas (modo 1x1/2x2).
+- `CanastraTable.tsx` — mesa: placar (só após fim de mão), jogos na mesa por
+  time (clicáveis pra selecionar como alvo de "acrescentar"), monte/lixo,
+  badges de morto, minha mão com seleção múltipla (clicar pra
+  selecionar cartas → "Formar jogo" / "Acrescentar" / "Descartar" /
+  "Comprar monte" / "Comprar lixo"), overlay de fim de mão com placar
+  detalhado e votação de revanche.
+- `CanastraGuide.tsx` — painel de regras (reutiliza o shell CSS
+  `.hand-guide-*` do `HandGuide.tsx`).
+
+**Cartas:** usa `CanastraCard` (não `Card`) — tem `id` único (o baralho
+duplo repete naipe+valor) e `suit`/`rank` nuláveis pros curingões.
+`CanastraTable` renderiza via um wrapper local (`CanastraCardFace`) que
+cai pro componente `PlayingCard` normal quando não é curingão.
+
 ## Observabilidade (Front)
 
 Observabilidade client-side é feita via **PostHog**:

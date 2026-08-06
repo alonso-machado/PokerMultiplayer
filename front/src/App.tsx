@@ -8,6 +8,7 @@ import type {
 import { useSocket } from './hooks/useSocket'
 import { useTrucoGame } from './hooks/useTrucoGame'
 import { useGauchoGame } from './hooks/useGauchoGame'
+import { useCanastraGame } from './hooks/useCanastraGame'
 import { getOrCreateIdentity, saveName, saveIdentityToken, saveTournamentToken, clearTournamentToken } from './hooks/usePlayerToken'
 import { Lobby } from './components/Lobby'
 import { TournamentTab } from './components/TournamentTab'
@@ -16,13 +17,15 @@ import { TrucoLobby } from './components/TrucoLobby'
 import { TrucoTable } from './components/TrucoTable'
 import { GauchoLobby } from './components/GauchoLobby'
 import { GauchoTable } from './components/GauchoTable'
+import { CanastraLobby } from './components/CanastraLobby'
+import { CanastraTable } from './components/CanastraTable'
 import { HandGuide } from './components/HandGuide'
 import { AdminPage } from './pages/AdminPage'
-import type { TrucoRoomSummary, GauchoRoomSummary } from '../../shared/types'
+import type { TrucoRoomSummary, GauchoRoomSummary, CanastraRoomSummary } from '../../shared/types'
 
 interface TurnState { validActions: PlayerAction[]; callAmount: number; minRaise: number }
 interface ShowdownEntry { playerId: string; playerName: string; cards: Card[]; bestCards: Card[]; handName: string; won: number }
-type GameGroup = 'poker' | 'truco' | 'gaucho'
+type GameGroup = 'poker' | 'truco' | 'gaucho' | 'canastra'
 type PokerTab = 'rooms' | 'tournament'
 
 const identity = getOrCreateIdentity()
@@ -39,6 +42,8 @@ function App() {
   const { trucoState, handleTrucoMessage } = useTrucoGame(identity.playerId)
   const [gauchoRooms, setGauchoRooms] = useState<GauchoRoomSummary[]>([])
   const { gauchoState, handleGauchoMessage } = useGauchoGame(identity.playerId)
+  const [canastraRooms, setCanastraRooms] = useState<CanastraRoomSummary[]>([])
+  const { canastraState, handleCanastraMessage } = useCanastraGame(identity.playerId)
 
   // Tournament
   const [tournamentInfo,       setTournamentInfo]       = useState<TournamentInfo | null>(null)
@@ -78,6 +83,7 @@ function App() {
       case 'room_list':       setRooms(msg.rooms); break
       case 'truco_room_list': setTrucoRooms(msg.rooms); break
       case 'gaucho_room_list': setGauchoRooms(msg.rooms); break
+      case 'canastra_room_list': setCanastraRooms(msg.rooms); break
       case 'tournament_info':
         // A brand-new tournament (different id) means our previous registration
         // token is stale — let the player register again for this one.
@@ -198,6 +204,7 @@ function App() {
       default:
         if (msg.type.startsWith('truco_')) handleTrucoMessage(msg)
         else if (msg.type.startsWith('gaucho_')) handleGauchoMessage(msg)
+        else if (msg.type.startsWith('canastra_')) handleCanastraMessage(msg)
         break
     }
   }, [])
@@ -221,6 +228,30 @@ function App() {
   }
 
   // ── Routing ───────────────────────────────────────────────────────────────
+
+  if (canastraState.roomId && canastraState.config) {
+    return (
+      <CanastraTable
+        myId={canastraState.myId}
+        roomName={canastraState.roomName}
+        config={canastraState.config}
+        players={canastraState.players}
+        tableState={canastraState.tableState}
+        myCards={canastraState.myCards}
+        isStarted={canastraState.isStarted}
+        turnDeadline={canastraState.turnDeadline}
+        roundEnd={canastraState.roundEnd}
+        rematch={canastraState.rematch}
+        onLeave={() => send({ type: 'canastra_leave_room' })}
+        onDrawStock={() => send({ type: 'canastra_draw_stock' })}
+        onTakeDiscard={(meldPlan) => send({ type: 'canastra_take_discard', meldPlan })}
+        onLayMeld={(cardIds) => send({ type: 'canastra_lay_meld', cardIds })}
+        onAddToMeld={(meldId, cardIds) => send({ type: 'canastra_add_to_meld', meldId, cardIds })}
+        onDiscard={(cardId) => send({ type: 'canastra_discard', cardId })}
+        onRematchVote={(accept) => send({ type: 'canastra_rematch_vote', accept })}
+      />
+    )
+  }
 
   if (gauchoState.roomId && gauchoState.config) {
     return (
@@ -314,11 +345,17 @@ function App() {
   return (
     <>
     <div className="lobby">
-      <h1>{activeGame === 'poker' ? "♠ Texas Hold'em ♥" : activeGame === 'truco' ? '🂡 Truco' : '🧉 Truco Gaúcho'}</h1>
+      <h1>
+        {activeGame === 'poker' ? "♠ Texas Hold'em ♥"
+          : activeGame === 'truco' ? '🂡 Truco'
+          : activeGame === 'gaucho' ? '🧉 Truco Gaúcho'
+          : '🎴 Canastra / Buraco'}
+      </h1>
       <p className="subtitle">
         {activeGame === 'poker' ? 'Poker multiplayer em tempo real'
           : activeGame === 'truco' ? 'Truco multiplayer — Paulista ou Mineiro'
-          : 'Truco Gaúcho / Espanhol — com Envido e Flor'}
+          : activeGame === 'gaucho' ? 'Truco Gaúcho / Espanhol — com Envido e Flor'
+          : 'Canastra / Buraco multiplayer — 1x1 ou 2x2'}
       </p>
       <NameRow name={myName} onSave={setMyName} />
 
@@ -326,6 +363,7 @@ function App() {
         <button className={`tab${activeGame === 'poker' ? ' active' : ''}`} onClick={() => setActiveGame('poker')}>♠ Poker</button>
         <button className={`tab${activeGame === 'truco' ? ' active' : ''}`} onClick={() => setActiveGame('truco')}>🂡 Truco</button>
         <button className={`tab${activeGame === 'gaucho' ? ' active' : ''}`} onClick={() => setActiveGame('gaucho')}>🧉 Truco Gaúcho</button>
+        <button className={`tab${activeGame === 'canastra' ? ' active' : ''}`} onClick={() => setActiveGame('canastra')}>🎴 Canastra</button>
       </div>
 
       {activeGame === 'poker' && (
@@ -373,6 +411,14 @@ function App() {
           rooms={gauchoRooms}
           onCreateRoom={(name, cfg) => send({ type: 'gaucho_create_room', roomName: name, config: cfg })}
           onJoinRoom={(id) => send({ type: 'gaucho_join_room', roomId: id })}
+        />
+      )}
+
+      {activeGame === 'canastra' && (
+        <CanastraLobby
+          rooms={canastraRooms}
+          onCreateRoom={(name, cfg) => send({ type: 'canastra_create_room', roomName: name, config: cfg })}
+          onJoinRoom={(id) => send({ type: 'canastra_join_room', roomId: id })}
         />
       )}
     </div>

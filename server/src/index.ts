@@ -13,6 +13,7 @@ const IS_DEV = process.env.NODE_ENV !== 'production'
 import { Room } from './room'
 import { TrucoRoom } from './trucoRoom'
 import { GauchoRoom } from './gauchoRoom'
+import { CanastraRoom } from './canastraRoom'
 import { Tournament } from './tournament'
 import { adminRouter, publicTournamentHandler } from './admin'
 
@@ -21,6 +22,7 @@ const MAX_LOBBY_ROOMS = Number(process.env.MAX_LOBBIES ?? 30)
 const rooms = new Map<string, Room>()
 const trucoRooms = new Map<string, TrucoRoom>()
 const gauchoRooms = new Map<string, GauchoRoom>()
+const canastraRooms = new Map<string, CanastraRoom>()
 let activeTournament: Tournament | null = null
 
 // ── Persistent player sessions (survive WS reconnect) ─────────────────────────
@@ -30,6 +32,7 @@ interface PersistentSession {
   roomId: string | null
   trucoRoomId: string | null
   gauchoRoomId: string | null
+  canastraRoomId: string | null
   tournamentToken: string | null
 }
 const playerSessions = new Map<string, PersistentSession>()
@@ -41,6 +44,7 @@ interface Session {
   roomId: string | null
   trucoRoomId: string | null
   gauchoRoomId: string | null
+  canastraRoomId: string | null
   tournamentToken: string | null
 }
 
@@ -82,6 +86,10 @@ function currentTrucoRoom(session: Session): TrucoRoom | undefined {
 
 function currentGauchoRoom(session: Session): GauchoRoom | undefined {
   return session.gauchoRoomId ? gauchoRooms.get(session.gauchoRoomId) : undefined
+}
+
+function currentCanastraRoom(session: Session): CanastraRoom | undefined {
+  return session.canastraRoomId ? canastraRooms.get(session.canastraRoomId) : undefined
 }
 
 // ── Admin callbacks ───────────────────────────────────────────────────────────
@@ -174,7 +182,7 @@ const server = Bun.serve<Session>({
 
     if (pathname === '/ws') {
       const ok = server.upgrade(req, {
-        data: { playerId: '', name: 'Jogador', roomId: null, trucoRoomId: null, gauchoRoomId: null, tournamentToken: null } as Session,
+        data: { playerId: '', name: 'Jogador', roomId: null, trucoRoomId: null, gauchoRoomId: null, canastraRoomId: null, tournamentToken: null } as Session,
       })
       return ok ? undefined : new Response('Upgrade failed', { status: 400 })
     }
@@ -207,6 +215,7 @@ const server = Bun.serve<Session>({
       send(ws, { type: 'room_list', rooms: lobbyRoomList() })
       send(ws, { type: 'truco_room_list', rooms: trucoRoomList() })
       send(ws, { type: 'gaucho_room_list', rooms: gauchoRoomList() })
+      send(ws, { type: 'canastra_room_list', rooms: canastraRoomList() })
       send(ws, { type: 'tournament_info', tournament: activeTournament?.info() ?? null })
     },
 
@@ -262,11 +271,21 @@ const server = Bun.serve<Session>({
               existing.gauchoRoomId = null
             }
           }
+          // Reconnect to Canastra room
+          if (existing.canastraRoomId) {
+            const canastraRoom = canastraRooms.get(existing.canastraRoomId)
+            if (canastraRoom) {
+              session.canastraRoomId = existing.canastraRoomId
+              canastraRoom.reconnect(pid, emit)
+            } else {
+              existing.canastraRoomId = null
+            }
+          }
           // Update send fn
           existing.name = session.name
           session.tournamentToken = session.tournamentToken ?? existing.tournamentToken
         } else {
-          playerSessions.set(pid, { playerId: pid, name: session.name, roomId: null, trucoRoomId: null, gauchoRoomId: null, tournamentToken: session.tournamentToken })
+          playerSessions.set(pid, { playerId: pid, name: session.name, roomId: null, trucoRoomId: null, gauchoRoomId: null, canastraRoomId: null, tournamentToken: session.tournamentToken })
         }
 
         // Restore tournament registration
@@ -542,6 +561,76 @@ const server = Bun.serve<Session>({
           break
         }
 
+        // ── Canastra / Buraco ────────────────────────────────────────────────
+        case 'canastra_list_rooms': emit({ type: 'canastra_room_list', rooms: canastraRoomList() }); break
+
+        case 'canastra_create_room': {
+          const room = new CanastraRoom(generateId(), msg.roomName.trim().slice(0, 40) || 'Mesa', session.name, msg.config, {
+            onExpire: () => { canastraRooms.delete(room.id); broadcastCanastraRoomList() },
+            onDissolve: () => { canastraRooms.delete(room.id); broadcastCanastraRoomList() },
+          })
+          canastraRooms.set(room.id, room)
+          room.join(session.playerId, session.name, emit)   // creator auto-joins
+          session.canastraRoomId = room.id
+          setPersistentCanastraRoom(session.playerId, room.id)
+          broadcastCanastraRoomList()
+          break
+        }
+
+        case 'canastra_join_room': {
+          const room = canastraRooms.get(msg.roomId)
+          if (!room)       { emit({ type: 'canastra_room_error', message: 'Mesa não encontrada.' }); break }
+          if (room.isFull) { emit({ type: 'canastra_room_error', message: 'Mesa cheia.' }); break }
+          if (room.isStarted) { emit({ type: 'canastra_room_error', message: 'Partida em andamento.' }); break }
+          if (session.canastraRoomId) leaveCanastraRoom(ws)
+          room.join(session.playerId, session.name, emit)
+          session.canastraRoomId = room.id
+          setPersistentCanastraRoom(session.playerId, room.id)
+          broadcastCanastraRoomList()
+          break
+        }
+
+        case 'canastra_leave_room':
+          leaveCanastraRoom(ws)
+          emit({ type: 'canastra_room_left', reason: 'manual' })
+          break
+
+        case 'canastra_draw_stock': {
+          const room = currentCanastraRoom(session)
+          room?.handleDrawStock(session.playerId)
+          break
+        }
+
+        case 'canastra_take_discard': {
+          const room = currentCanastraRoom(session)
+          room?.handleTakeDiscard(session.playerId, msg.meldPlan)
+          break
+        }
+
+        case 'canastra_lay_meld': {
+          const room = currentCanastraRoom(session)
+          room?.handleLayMeld(session.playerId, msg.cardIds)
+          break
+        }
+
+        case 'canastra_add_to_meld': {
+          const room = currentCanastraRoom(session)
+          room?.handleAddToMeld(session.playerId, msg.meldId, msg.cardIds)
+          break
+        }
+
+        case 'canastra_discard': {
+          const room = currentCanastraRoom(session)
+          room?.handleDiscard(session.playerId, msg.cardId)
+          break
+        }
+
+        case 'canastra_rematch_vote': {
+          const room = currentCanastraRoom(session)
+          room?.handleRematchVote(session.playerId, msg.accept)
+          break
+        }
+
         // ── Tournament registration ─────────────────────────────────────────
         case 'register_tournament': {
           if (!activeTournament) { emit({ type: 'tournament_error', message: 'Nenhum torneio disponível.' }); break }
@@ -631,6 +720,24 @@ function setPersistentGauchoRoom(pid: string, gauchoRoomId: string | null): void
   if (ps) ps.gauchoRoomId = gauchoRoomId
 }
 
+function leaveCanastraRoom(ws: { data: Session }): void {
+  const { playerId, canastraRoomId } = ws.data
+  if (!canastraRoomId) return
+  const room = canastraRooms.get(canastraRoomId)
+  if (room) {
+    room.leave(playerId)
+    if (room.playerCount === 0) { room.destroy(); canastraRooms.delete(canastraRoomId) }
+  }
+  ws.data.canastraRoomId = null
+  setPersistentCanastraRoom(playerId, null)
+  broadcastCanastraRoomList()
+}
+
+function setPersistentCanastraRoom(pid: string, canastraRoomId: string | null): void {
+  const ps = playerSessions.get(pid)
+  if (ps) ps.canastraRoomId = canastraRoomId
+}
+
 function setPersistentToken(pid: string, token: string | null): void {
   const ps = playerSessions.get(pid)
   if (ps) ps.tournamentToken = token
@@ -640,6 +747,7 @@ function lobbyRoomList()  { return [...rooms.values()].filter(r => !r.tournament
 function lobbyRoomCount() { return [...rooms.values()].filter(r => !r.tournamentId).length }
 function trucoRoomList()  { return [...trucoRooms.values()].map(r => r.summary()) }
 function gauchoRoomList() { return [...gauchoRooms.values()].map(r => r.summary()) }
+function canastraRoomList() { return [...canastraRooms.values()].map(r => r.summary()) }
 
 function broadcastRoomList(): void {
   server.publish('lobby', JSON.stringify({ type: 'room_list', rooms: lobbyRoomList() } satisfies ServerMessage))
@@ -649,6 +757,9 @@ function broadcastTrucoRoomList(): void {
 }
 function broadcastGauchoRoomList(): void {
   server.publish('lobby', JSON.stringify({ type: 'gaucho_room_list', rooms: gauchoRoomList() } satisfies ServerMessage))
+}
+function broadcastCanastraRoomList(): void {
+  server.publish('lobby', JSON.stringify({ type: 'canastra_room_list', rooms: canastraRoomList() } satisfies ServerMessage))
 }
 function broadcastTournamentInfo(): void {
   server.publish('lobby', JSON.stringify({ type: 'tournament_info', tournament: activeTournament?.info() ?? null } satisfies ServerMessage))

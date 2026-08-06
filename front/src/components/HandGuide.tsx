@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { PlayingCard } from './PlayingCard'
+import { useSidebarWidth } from '../hooks/useSidebarWidth'
 import type { Card } from '../../../shared/types'
 
 interface HandExample {
@@ -117,6 +118,7 @@ const HANDS: HandExample[] = [
 
 export function HandGuide() {
   const [open, setOpen] = useState(false)
+  const { style, onDragStart, isDesktop } = useSidebarWidth()
 
   return (
     <>
@@ -129,7 +131,8 @@ export function HandGuide() {
         {open ? '✕' : '?'}
       </button>
 
-      <aside className={`hand-guide-sidebar${open ? ' open' : ''}`} aria-hidden={!open}>
+      <aside className={`hand-guide-sidebar${open ? ' open' : ''}`} style={style} aria-hidden={!open}>
+        {isDesktop && <div className="hg-resize-handle" onMouseDown={onDragStart} title="Arrastar para redimensionar" />}
         <div className="hg-header">
           <h2>Hand Rankings</h2>
           <span className="hg-sub">da mais forte para a mais fraca</span>

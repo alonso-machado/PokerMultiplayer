@@ -1,12 +1,14 @@
-import type { Card, ClientMessage, GauchoRoomConfig, PlayerAction, Rank, RoomConfig, Suit, TrucoRoomConfig } from '../../shared/types'
+import type { Card, CanastraMeldPlan, CanastraRoomConfig, ClientMessage, GauchoRoomConfig, PlayerAction, Rank, RoomConfig, Suit, TrucoRoomConfig } from '../../shared/types'
 
 const MAX_PAYLOAD_BYTES = 512
+const MAX_MELD_CARDS    = 20
 const VALID_ACTIONS     = new Set<string>(['fold', 'check', 'call', 'raise', 'all-in'])
 const VALID_SUITS       = new Set<string>(['spades', 'hearts', 'diamonds', 'clubs'])
 const VALID_RANKS       = new Set<string>(['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'])
 const VALID_TRUCO_MODES = new Set<string>(['1x1', '2x2'])
 const VALID_MANILHA_VARIANTS = new Set<string>(['vira', 'fixed'])
 const VALID_GAUCHO_MODES = new Set<string>(['1x1', '2x2'])
+const VALID_CANASTRA_MODES = new Set<string>(['1x1', '2x2'])
 
 function isString(v: unknown): v is string   { return typeof v === 'string' }
 // Signed token: 64-char playerId + '.' + ~43-char base64url HMAC = ~108 chars. Cap at 128.
@@ -56,6 +58,34 @@ function parseGauchoConfig(v: unknown): GauchoRoomConfig | null {
   const c = v as Record<string, unknown>
   if (!isString(c.mode) || !VALID_GAUCHO_MODES.has(c.mode)) return null
   return { mode: c.mode as GauchoRoomConfig['mode'] }
+}
+
+function parseCanastraConfig(v: unknown): CanastraRoomConfig | null {
+  if (typeof v !== 'object' || v === null) return null
+  const c = v as Record<string, unknown>
+  if (!isString(c.mode) || !VALID_CANASTRA_MODES.has(c.mode)) return null
+  return { mode: c.mode as CanastraRoomConfig['mode'] }
+}
+
+function parseIdArray(v: unknown): string[] | null {
+  if (!Array.isArray(v) || v.length === 0 || v.length > MAX_MELD_CARDS) return null
+  if (!v.every((id) => isSafeId(id))) return null
+  return v as string[]
+}
+
+function parseMeldPlan(v: unknown): CanastraMeldPlan | null {
+  if (typeof v !== 'object' || v === null) return null
+  const p = v as Record<string, unknown>
+  if (p.kind === 'new') {
+    const cardIds = parseIdArray(p.cardIds)
+    if (!cardIds) return null
+    return { kind: 'new', cardIds }
+  }
+  if (p.kind === 'append') {
+    if (!isSafeId(p.meldId) || !isSafeId(p.cardId)) return null
+    return { kind: 'append', meldId: p.meldId, cardId: p.cardId }
+  }
+  return null
 }
 
 /**
@@ -196,6 +226,49 @@ export function parseClientMessage(raw: unknown): ClientMessage | null {
     case 'gaucho_rematch_vote':
       if (!isBool(m.accept)) return null
       return { type: 'gaucho_rematch_vote', accept: m.accept }
+
+    // ── Canastra / Buraco ───────────────────────────────────────────────
+    case 'canastra_list_rooms': return { type: 'canastra_list_rooms' }
+    case 'canastra_leave_room': return { type: 'canastra_leave_room' }
+    case 'canastra_draw_stock': return { type: 'canastra_draw_stock' }
+
+    case 'canastra_create_room': {
+      if (!isSafeRoomName(m.roomName)) return null
+      const config = parseCanastraConfig(m.config)
+      if (!config) return null
+      return { type: 'canastra_create_room', roomName: m.roomName as string, config }
+    }
+
+    case 'canastra_join_room':
+      if (!isSafeId(m.roomId)) return null
+      return { type: 'canastra_join_room', roomId: m.roomId as string }
+
+    case 'canastra_take_discard': {
+      const meldPlan = parseMeldPlan(m.meldPlan)
+      if (!meldPlan) return null
+      return { type: 'canastra_take_discard', meldPlan }
+    }
+
+    case 'canastra_lay_meld': {
+      const cardIds = parseIdArray(m.cardIds)
+      if (!cardIds) return null
+      return { type: 'canastra_lay_meld', cardIds }
+    }
+
+    case 'canastra_add_to_meld': {
+      if (!isSafeId(m.meldId)) return null
+      const cardIds = parseIdArray(m.cardIds)
+      if (!cardIds) return null
+      return { type: 'canastra_add_to_meld', meldId: m.meldId, cardIds }
+    }
+
+    case 'canastra_discard':
+      if (!isSafeId(m.cardId)) return null
+      return { type: 'canastra_discard', cardId: m.cardId }
+
+    case 'canastra_rematch_vote':
+      if (!isBool(m.accept)) return null
+      return { type: 'canastra_rematch_vote', accept: m.accept }
 
     default:
       return null

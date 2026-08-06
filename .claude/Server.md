@@ -92,6 +92,26 @@ o padrão de broadcast/expiry/reconnect. Ver `.claude/Truco.md` para as regras.
   nunca compare com o token assinado do cliente (`identity.playerId`) sem antes
   extrair o id via uma mensagem do servidor (`truco_room_joined.yourId`).
 
+## Canastra / Buraco
+
+Sistema totalmente paralelo, mesmo padrão do Truco — não compartilha `Room`
+nem estado com Poker/Truco/Gaúcho. Ver `.claude/Canastra.md` para as regras.
+Diferença de arquitetura: aqui **uma "partida" é uma mão só** (sem repetir
+mãos até uma pontuação alvo).
+
+- `canastra/deck.ts` — baralho de 108 cartas (2×52 + 4 curingões) e
+  validação de jogos (`validateMeld`: sequência/trinca, limite de curinga,
+  detecção de canastra limpa/suja).
+- `canastra/gameEngine.ts` (`CanastraGame`) — máquina de estados de uma mão:
+  mãos, mortos, monte, lixo, jogos por time, turno (`draw`/`act`), batida
+  (direta/indireta), pontuação final.
+- `canastraRoom.ts` (`CanastraRoom`) — assentos/times, ciclo da mão,
+  votação de revanche, timeout de turno (`CANASTRA_TIMEOUT`, default 60s —
+  compra do monte se possível e descarta a 1ª carta da mão).
+- `index.ts`: `canastraRooms` é um `Map` separado; roteamento via
+  `session.canastraRoomId` + `currentCanastraRoom()`, espelhando
+  `currentTrucoRoom()`/`currentGauchoRoom()`.
+
 ## Rotas HTTP
 
 | Método | Path | Auth | Descrição |

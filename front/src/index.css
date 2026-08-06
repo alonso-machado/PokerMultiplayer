@@ -584,6 +584,40 @@ input:focus { border-color: var(--gold); }
 .truco-manilha-cards { display: flex; gap: 0.7rem; margin-top: 0.3rem; }
 .truco-manilha-card { display: flex; flex-direction: column; align-items: center; gap: 0.15rem; }
 
+/* ── Canastra / Buraco table ────────────────────────────────────────────── */
+.canastra-teams { display: flex; gap: 0.7rem; }
+.canastra-team-panel { flex: 1; background: #1a2e1f; border: 2px solid var(--border); border-radius: 10px; padding: 0.6rem 0.7rem; min-width: 0; }
+.canastra-team-panel.team-0 { border-color: var(--blue); }
+.canastra-team-panel.team-1 { border-color: var(--red); }
+.canastra-team-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; font-size: 0.82rem; }
+
+.canastra-melds { display: flex; flex-direction: column; gap: 0.4rem; }
+.canastra-meld {
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 8px;
+  padding: 0.35rem 0.4rem; text-align: left; display: flex; flex-direction: column; gap: 0.25rem;
+}
+.canastra-meld:disabled { cursor: default; }
+.canastra-meld:not(:disabled):hover { border-color: var(--gold); }
+.canastra-meld.selected { border-color: var(--gold); box-shadow: 0 0 10px rgba(201,168,76,0.5); }
+.canastra-meld.canastra-clean { border-color: #2ecc71; }
+.canastra-meld.canastra-dirty { border-color: #d68a2a; }
+.canastra-meld-badge { font-size: 0.65rem; font-weight: 800; letter-spacing: 0.03em; color: var(--gold-light); }
+.canastra-meld-cards { display: flex; gap: 0.15rem; flex-wrap: wrap; }
+
+.canastra-piles { display: flex; justify-content: center; gap: 1.5rem; align-items: flex-end; }
+.canastra-pile { display: flex; flex-direction: column; align-items: center; gap: 0.3rem; }
+.canastra-stock { background: transparent; padding: 0; border-radius: 6px; }
+.canastra-stock:disabled { opacity: 0.5; cursor: default; }
+.canastra-stock:not(:disabled):hover { transform: translateY(-4px); }
+
+.truco-hand-card.selected { transform: translateY(-8px); box-shadow: 0 0 12px rgba(201,168,76,0.7); border-radius: 6px; }
+.canastra-action-bar { flex-wrap: wrap; flex-direction: row; justify-content: center; }
+.canastra-action-bar button { flex: 1 1 auto; min-width: 120px; }
+
+.canastra-breakdown { display: flex; gap: 1rem; margin: 0.6rem 0; }
+.canastra-breakdown-team { flex: 1; background: #1a2e1f; border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.7rem; display: flex; flex-direction: column; gap: 0.2rem; }
+.canastra-breakdown-team strong:first-child { color: var(--gold-light); margin-bottom: 0.2rem; }
+
 /* ── Truco rules guide (reuses .hand-guide-* / .hg-* shell) ─────────────── */
 .tg-list { padding: 0.7rem 0.9rem; display: flex; flex-direction: column; gap: 1rem; }
 .tg-section h3 { color: var(--gold-light); font-size: 0.85rem; margin-bottom: 0.3rem; }
@@ -627,7 +661,9 @@ input:focus { border-color: var(--gold); }
 .hand-guide-sidebar {
   position: fixed;
   top: 0; right: 0; bottom: 0;
-  width: 300px;
+  width: 340px;
+  min-width: 260px;
+  max-width: 720px;
   z-index: 490;
   background: #0f1f14;
   border-left: 1px solid var(--border);
@@ -638,6 +674,18 @@ input:focus { border-color: var(--gold); }
   overflow: hidden;
 }
 .hand-guide-sidebar.open { transform: translateX(0); }
+
+/* Drag-to-resize handle on the left edge (desktop only — see useSidebarWidth) */
+.hg-resize-handle {
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  width: 6px;
+  cursor: ew-resize;
+  z-index: 2;
+  background: transparent;
+  transition: background 0.15s;
+}
+.hg-resize-handle:hover, .hg-resize-handle:active { background: rgba(201,168,76,0.5); }
 
 .hg-header {
   padding: 1rem 1rem 0.7rem;

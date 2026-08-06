@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { PlayingCard } from './PlayingCard'
+import { useSidebarWidth } from '../hooks/useSidebarWidth'
 import type { Card } from '../../../shared/types'
 
 // Strongest → weakest: 4♣ (Zap) > 7♥ (Copas) > A♠ (Espadilha) > 7♦ (Ouros) —
@@ -13,6 +14,7 @@ const FIXED_MANILHAS: (Card & { label: string })[] = [
 
 export function TrucoGuide() {
   const [open, setOpen] = useState(false)
+  const { style, onDragStart, isDesktop } = useSidebarWidth()
 
   return (
     <>
@@ -25,7 +27,8 @@ export function TrucoGuide() {
         {open ? '✕' : '?'}
       </button>
 
-      <aside className={`hand-guide-sidebar${open ? ' open' : ''}`} aria-hidden={!open}>
+      <aside className={`hand-guide-sidebar${open ? ' open' : ''}`} style={style} aria-hidden={!open}>
+        {isDesktop && <div className="hg-resize-handle" onMouseDown={onDragStart} title="Arrastar para redimensionar" />}
         <div className="hg-header">
           <h2>Regras do Truco</h2>
           <span className="hg-sub">Truco Paulista (vira) e Mineiro (fixa)</span>
