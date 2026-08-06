@@ -1,4 +1,4 @@
-import type { Card, ClientMessage, PlayerAction, Rank, RoomConfig, Suit, TrucoRoomConfig } from '../../shared/types'
+import type { Card, ClientMessage, GauchoRoomConfig, PlayerAction, Rank, RoomConfig, Suit, TrucoRoomConfig } from '../../shared/types'
 
 const MAX_PAYLOAD_BYTES = 512
 const VALID_ACTIONS     = new Set<string>(['fold', 'check', 'call', 'raise', 'all-in'])
@@ -6,6 +6,7 @@ const VALID_SUITS       = new Set<string>(['spades', 'hearts', 'diamonds', 'club
 const VALID_RANKS       = new Set<string>(['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'])
 const VALID_TRUCO_MODES = new Set<string>(['1x1', '2x2'])
 const VALID_MANILHA_VARIANTS = new Set<string>(['vira', 'fixed'])
+const VALID_GAUCHO_MODES = new Set<string>(['1x1', '2x2'])
 
 function isString(v: unknown): v is string   { return typeof v === 'string' }
 // Signed token: 64-char playerId + '.' + ~43-char base64url HMAC = ~108 chars. Cap at 128.
@@ -48,6 +49,13 @@ function parseTrucoConfig(v: unknown): TrucoRoomConfig | null {
   if (!isString(c.mode) || !VALID_TRUCO_MODES.has(c.mode)) return null
   if (!isString(c.manilhaVariant) || !VALID_MANILHA_VARIANTS.has(c.manilhaVariant)) return null
   return { mode: c.mode as TrucoRoomConfig['mode'], manilhaVariant: c.manilhaVariant as TrucoRoomConfig['manilhaVariant'] }
+}
+
+function parseGauchoConfig(v: unknown): GauchoRoomConfig | null {
+  if (typeof v !== 'object' || v === null) return null
+  const c = v as Record<string, unknown>
+  if (!isString(c.mode) || !VALID_GAUCHO_MODES.has(c.mode)) return null
+  return { mode: c.mode as GauchoRoomConfig['mode'] }
 }
 
 /**
@@ -144,6 +152,50 @@ export function parseClientMessage(raw: unknown): ClientMessage | null {
     case 'truco_rematch_vote':
       if (!isBool(m.accept)) return null
       return { type: 'truco_rematch_vote', accept: m.accept }
+
+    // ── Truco Gaúcho ─────────────────────────────────────────────────────
+    case 'gaucho_list_rooms': return { type: 'gaucho_list_rooms' }
+    case 'gaucho_leave_room': return { type: 'gaucho_leave_room' }
+    case 'gaucho_call_truco': return { type: 'gaucho_call_truco' }
+    case 'gaucho_call_envido': return { type: 'gaucho_call_envido' }
+    case 'gaucho_call_flor': return { type: 'gaucho_call_flor' }
+
+    case 'gaucho_create_room': {
+      if (!isSafeRoomName(m.roomName)) return null
+      const config = parseGauchoConfig(m.config)
+      if (!config) return null
+      return { type: 'gaucho_create_room', roomName: m.roomName as string, config }
+    }
+
+    case 'gaucho_join_room':
+      if (!isSafeId(m.roomId)) return null
+      return { type: 'gaucho_join_room', roomId: m.roomId as string }
+
+    case 'gaucho_play_card': {
+      const card = parseCard(m.card)
+      if (!card) return null
+      return { type: 'gaucho_play_card', card }
+    }
+
+    case 'gaucho_respond_truco':
+      if (!isBool(m.accept)) return null
+      return { type: 'gaucho_respond_truco', accept: m.accept }
+
+    case 'gaucho_respond_envido':
+      if (!isBool(m.accept)) return null
+      return { type: 'gaucho_respond_envido', accept: m.accept }
+
+    case 'gaucho_respond_flor':
+      if (!isBool(m.accept)) return null
+      return { type: 'gaucho_respond_flor', accept: m.accept }
+
+    case 'gaucho_mao_de_onze_decision':
+      if (!isBool(m.accept)) return null
+      return { type: 'gaucho_mao_de_onze_decision', accept: m.accept }
+
+    case 'gaucho_rematch_vote':
+      if (!isBool(m.accept)) return null
+      return { type: 'gaucho_rematch_vote', accept: m.accept }
 
     default:
       return null

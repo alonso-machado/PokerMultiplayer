@@ -7,19 +7,22 @@ import type {
 } from '../../shared/types'
 import { useSocket } from './hooks/useSocket'
 import { useTrucoGame } from './hooks/useTrucoGame'
+import { useGauchoGame } from './hooks/useGauchoGame'
 import { getOrCreateIdentity, saveName, saveIdentityToken, saveTournamentToken, clearTournamentToken } from './hooks/usePlayerToken'
 import { Lobby } from './components/Lobby'
 import { TournamentTab } from './components/TournamentTab'
 import { PokerTable } from './components/PokerTable'
 import { TrucoLobby } from './components/TrucoLobby'
 import { TrucoTable } from './components/TrucoTable'
+import { GauchoLobby } from './components/GauchoLobby'
+import { GauchoTable } from './components/GauchoTable'
 import { HandGuide } from './components/HandGuide'
 import { AdminPage } from './pages/AdminPage'
-import type { TrucoRoomSummary } from '../../shared/types'
+import type { TrucoRoomSummary, GauchoRoomSummary } from '../../shared/types'
 
 interface TurnState { validActions: PlayerAction[]; callAmount: number; minRaise: number }
 interface ShowdownEntry { playerId: string; playerName: string; cards: Card[]; bestCards: Card[]; handName: string; won: number }
-type GameGroup = 'poker' | 'truco'
+type GameGroup = 'poker' | 'truco' | 'gaucho'
 type PokerTab = 'rooms' | 'tournament'
 
 const identity = getOrCreateIdentity()
@@ -34,6 +37,8 @@ function App() {
   const [rooms, setRooms]         = useState<RoomSummary[]>([])
   const [trucoRooms, setTrucoRooms] = useState<TrucoRoomSummary[]>([])
   const { trucoState, handleTrucoMessage } = useTrucoGame(identity.playerId)
+  const [gauchoRooms, setGauchoRooms] = useState<GauchoRoomSummary[]>([])
+  const { gauchoState, handleGauchoMessage } = useGauchoGame(identity.playerId)
 
   // Tournament
   const [tournamentInfo,       setTournamentInfo]       = useState<TournamentInfo | null>(null)
@@ -72,6 +77,7 @@ function App() {
     switch (msg.type) {
       case 'room_list':       setRooms(msg.rooms); break
       case 'truco_room_list': setTrucoRooms(msg.rooms); break
+      case 'gaucho_room_list': setGauchoRooms(msg.rooms); break
       case 'tournament_info':
         // A brand-new tournament (different id) means our previous registration
         // token is stale — let the player register again for this one.
@@ -191,6 +197,7 @@ function App() {
 
       default:
         if (msg.type.startsWith('truco_')) handleTrucoMessage(msg)
+        else if (msg.type.startsWith('gaucho_')) handleGauchoMessage(msg)
         break
     }
   }, [])
@@ -214,6 +221,38 @@ function App() {
   }
 
   // ── Routing ───────────────────────────────────────────────────────────────
+
+  if (gauchoState.roomId && gauchoState.config) {
+    return (
+      <GauchoTable
+        myId={gauchoState.myId}
+        roomName={gauchoState.roomName}
+        config={gauchoState.config}
+        players={gauchoState.players}
+        tableState={gauchoState.tableState}
+        myCards={gauchoState.myCards}
+        dealtCards={gauchoState.dealtCards}
+        isStarted={gauchoState.isStarted}
+        turnDeadline={gauchoState.turnDeadline}
+        maoDeOnzePrompt={gauchoState.maoDeOnzePrompt}
+        handEnd={gauchoState.handEnd}
+        matchEnd={gauchoState.matchEnd}
+        rematch={gauchoState.rematch}
+        lastCall={gauchoState.lastCall}
+        lastResult={gauchoState.lastResult}
+        onLeave={() => send({ type: 'gaucho_leave_room' })}
+        onPlayCard={(card) => send({ type: 'gaucho_play_card', card })}
+        onCallTruco={() => send({ type: 'gaucho_call_truco' })}
+        onRespondTruco={(accept) => send({ type: 'gaucho_respond_truco', accept })}
+        onCallEnvido={() => send({ type: 'gaucho_call_envido' })}
+        onRespondEnvido={(accept) => send({ type: 'gaucho_respond_envido', accept })}
+        onCallFlor={() => send({ type: 'gaucho_call_flor' })}
+        onRespondFlor={(accept) => send({ type: 'gaucho_respond_flor', accept })}
+        onMaoDeOnzeDecision={(accept) => send({ type: 'gaucho_mao_de_onze_decision', accept })}
+        onRematchVote={(accept) => send({ type: 'gaucho_rematch_vote', accept })}
+      />
+    )
+  }
 
   if (trucoState.roomId && trucoState.config) {
     return (
@@ -275,13 +314,18 @@ function App() {
   return (
     <>
     <div className="lobby">
-      <h1>{activeGame === 'poker' ? "♠ Texas Hold'em ♥" : '🂡 Truco'}</h1>
-      <p className="subtitle">{activeGame === 'poker' ? 'Poker multiplayer em tempo real' : 'Truco multiplayer — Paulista ou Mineiro'}</p>
+      <h1>{activeGame === 'poker' ? "♠ Texas Hold'em ♥" : activeGame === 'truco' ? '🂡 Truco' : '🧉 Truco Gaúcho'}</h1>
+      <p className="subtitle">
+        {activeGame === 'poker' ? 'Poker multiplayer em tempo real'
+          : activeGame === 'truco' ? 'Truco multiplayer — Paulista ou Mineiro'
+          : 'Truco Gaúcho / Espanhol — com Envido e Flor'}
+      </p>
       <NameRow name={myName} onSave={setMyName} />
 
       <div className="tabs game-tabs">
         <button className={`tab${activeGame === 'poker' ? ' active' : ''}`} onClick={() => setActiveGame('poker')}>♠ Poker</button>
         <button className={`tab${activeGame === 'truco' ? ' active' : ''}`} onClick={() => setActiveGame('truco')}>🂡 Truco</button>
+        <button className={`tab${activeGame === 'gaucho' ? ' active' : ''}`} onClick={() => setActiveGame('gaucho')}>🧉 Truco Gaúcho</button>
       </div>
 
       {activeGame === 'poker' && (
@@ -321,6 +365,14 @@ function App() {
           rooms={trucoRooms}
           onCreateRoom={(name, cfg) => send({ type: 'truco_create_room', roomName: name, config: cfg })}
           onJoinRoom={(id) => send({ type: 'truco_join_room', roomId: id })}
+        />
+      )}
+
+      {activeGame === 'gaucho' && (
+        <GauchoLobby
+          rooms={gauchoRooms}
+          onCreateRoom={(name, cfg) => send({ type: 'gaucho_create_room', roomName: name, config: cfg })}
+          onJoinRoom={(id) => send({ type: 'gaucho_join_room', roomId: id })}
         />
       )}
     </div>

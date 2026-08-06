@@ -130,6 +130,8 @@ export type ClientMessage =
   | { type: 'set_back' }   // tournament-only
   // Truco (see below)
   | TrucoClientMessage
+  // Truco Gaúcho (see below)
+  | GauchoClientMessage
 
 // ─── WebSocket: Server → Client ───────────────────────────────────────────────
 
@@ -184,6 +186,8 @@ export type ServerMessage =
   | { type: 'error'; message: string }
   // ── Truco (see below) ─────────────────────────────────────────────────────
   | TrucoServerMessage
+  // ── Truco Gaúcho (see below) ──────────────────────────────────────────────
+  | GauchoServerMessage
 
 export interface ShowdownResult {
   playerId: string
@@ -298,3 +302,156 @@ export type TrucoServerMessage =
   | { type: 'truco_match_end'; winnerTeam: 0 | 1; scores: [number, number]; matchWins: Record<string, number> }
   /** Broadcast — rematch vote progress */
   | { type: 'truco_rematch_status'; accepted: string[]; pending: string[] }
+
+// ─── Truco Gaúcho / Espanhol ──────────────────────────────────────────────
+// See .claude/TrucoGaucho.md for the full rules this section's types model.
+// Separate game from Truco above — no shared runtime state, only the same
+// message-shape conventions.
+
+export type GauchoMode = '1x1' | '2x2'
+
+export interface GauchoRoomConfig {
+  mode: GauchoMode
+  // No manilha choice — this variant's manilhas are always the fixed
+  // A♠ > A♣ > 7♠ > 7♦ set, never a vira.
+}
+
+export interface GauchoRoomSummary {
+  id: string
+  name: string
+  creatorName: string
+  playerCount: number
+  maxPlayers: number   // 2 (1x1) or 4 (2x2)
+  status: RoomStatus
+  config: GauchoRoomConfig
+}
+
+export type GauchoPlayerStatus = 'waiting' | 'active' | 'mao_de_onze_pending' | 'disconnected'
+
+export interface GauchoPlayer {
+  id: string
+  name: string
+  seatIndex: number
+  teamIndex: 0 | 1
+  status: GauchoPlayerStatus
+  matchWins: number
+}
+
+export type GauchoCallLevel = 1 | 2 | 3 | 4
+export type GauchoPhase = 'waiting' | 'mao_de_onze_decision' | 'playing' | 'hand_end' | 'match_end'
+
+export interface GauchoVazaCard {
+  playerId: string
+  card: Card
+}
+
+export type GauchoEnvidoCallLevel = 'envido' | 'real_envido' | 'falta_envido'
+export type GauchoFlorCallLevel = 'flor' | 'contra_flor' | 'contra_flor_e_o_resto'
+
+export interface GauchoEnvidoState {
+  status: 'available' | 'closed'
+  pendingCall: GauchoEnvidoCallLevel | null
+  calledByTeam: 0 | 1 | null
+  awaitingResponseFromTeam: 0 | 1 | null
+  stake: number   // points already locked in by an accept so far (0 = nothing accepted yet)
+}
+
+export interface GauchoFlorState {
+  status: 'available' | 'closed'
+  pendingCall: GauchoFlorCallLevel | null
+  calledByTeam: 0 | 1 | null
+  awaitingResponseFromTeam: 0 | 1 | null
+  stake: number
+}
+
+export interface GauchoTableState {
+  phase: GauchoPhase
+  manilhaCards: Card[]           // always the 4 fixed Gaúcho manilhas — constant all match
+  vaza: 1 | 2 | 3
+  vazaCardsPlayed: GauchoVazaCard[]
+  vazaWinners: (0 | 1 | null)[]
+  stake: GauchoCallLevel
+  pendingStake: GauchoCallLevel | null
+  stakeCalledByTeam: 0 | 1 | null
+  awaitingResponseFromTeam: 0 | 1 | null
+  envido: GauchoEnvidoState
+  flor: GauchoFlorState
+  dealerSeat: number
+  leaderSeat: number
+  currentSeat: number
+  scores: [number, number]
+}
+
+// ─── WebSocket: Client → Server (Truco Gaúcho) ─────────────────────────────
+
+export type GauchoClientMessage =
+  | { type: 'gaucho_list_rooms' }
+  | { type: 'gaucho_create_room'; roomName: string; config: GauchoRoomConfig }
+  | { type: 'gaucho_join_room'; roomId: string }
+  | { type: 'gaucho_leave_room' }
+  | { type: 'gaucho_play_card'; card: Card }
+  | { type: 'gaucho_call_truco' }
+  | { type: 'gaucho_respond_truco'; accept: boolean }
+  | { type: 'gaucho_call_envido' }
+  | { type: 'gaucho_respond_envido'; accept: boolean }
+  | { type: 'gaucho_call_flor' }
+  | { type: 'gaucho_respond_flor'; accept: boolean }
+  | { type: 'gaucho_mao_de_onze_decision'; accept: boolean }
+  | { type: 'gaucho_rematch_vote'; accept: boolean }
+
+// ─── WebSocket: Server → Client (Truco Gaúcho) ─────────────────────────────
+
+export type GauchoServerMessage =
+  | { type: 'gaucho_room_list'; rooms: GauchoRoomSummary[] }
+  | { type: 'gaucho_room_joined'; roomId: string; roomName: string; config: GauchoRoomConfig; yourId: string }
+  | { type: 'gaucho_room_left'; reason?: 'manual' | 'expired' | 'abandoned' | 'rematch_declined' }
+  | { type: 'gaucho_room_error'; message: string }
+  | { type: 'gaucho_player_list'; players: GauchoPlayer[] }
+  | { type: 'gaucho_game_started' }
+  /** Private — sent only to the receiving player at the start of each hand */
+  | { type: 'gaucho_hand_dealt'; yourCards: Card[]; players: GauchoPlayer[]; tableState: GauchoTableState }
+  /** Private — sent to the player whose turn it is (or who may respond) */
+  | {
+      type: 'gaucho_your_turn'
+      canCallTruco: boolean; canRespondTruco: boolean
+      canCallEnvido: boolean; canRespondEnvido: boolean
+      canCallFlor: boolean; canRespondFlor: boolean
+      timeoutSeconds: number
+    }
+  /** Broadcast — a card was played */
+  | { type: 'gaucho_card_played'; playerId: string; card: Card; tableState: GauchoTableState }
+  /** Broadcast — a vaza was resolved */
+  | { type: 'gaucho_vaza_result'; winnerTeam: 0 | 1 | null; tableState: GauchoTableState }
+  /** Broadcast — someone called truco/retruco/vale_quatro */
+  | { type: 'gaucho_truco_call_made'; playerId: string; level: GauchoCallLevel; tableState: GauchoTableState }
+  /** Broadcast — a team accepted or ran from a pending truco call */
+  | { type: 'gaucho_truco_call_responded'; playerId: string; accept: boolean; tableState: GauchoTableState }
+  /** Broadcast — someone called/raised envido */
+  | { type: 'gaucho_envido_call_made'; playerId: string; level: GauchoEnvidoCallLevel; tableState: GauchoTableState }
+  /** Broadcast — envido negotiation concluded (accepted+compared, or declined) */
+  | {
+      type: 'gaucho_envido_result'
+      winnerTeam: 0 | 1 | null; points: number; reason: 'compared' | 'corri'
+      values: Record<string, number>   // playerId → envido value; empty on 'corri'
+      tableState: GauchoTableState
+    }
+  /** Broadcast — someone called/raised flor */
+  | { type: 'gaucho_flor_call_made'; playerId: string; level: GauchoFlorCallLevel; tableState: GauchoTableState }
+  /** Broadcast — flor negotiation concluded (uncontested, accepted+compared, or declined) */
+  | {
+      type: 'gaucho_flor_result'
+      winnerTeam: 0 | 1 | null; points: number; reason: 'uncontested' | 'compared' | 'corri'
+      values: Record<string, number>   // playerId → flor value; only players who declared
+      tableState: GauchoTableState
+    }
+  /**
+   * Private — sent only to players on the affected team(s) at mão de 11/ferro.
+   * teamCards is that recipient's team's combined hand (self + partner in 2x2).
+   */
+  | { type: 'gaucho_mao_de_onze_prompt'; teamCards: Card[]; isFerro: boolean; timeoutSeconds: number }
+  /** Broadcast — hand ended, points awarded */
+  | { type: 'gaucho_hand_end'; winnerTeam: 0 | 1 | null; points: number; reason: 'vazas' | 'corri' | 'mao_de_onze_run'; tableState: GauchoTableState }
+  /** Broadcast — match ended (a team hit 12) */
+  | { type: 'gaucho_match_end'; winnerTeam: 0 | 1; scores: [number, number]; matchWins: Record<string, number> }
+  /** Broadcast — rematch vote progress */
+  | { type: 'gaucho_rematch_status'; accepted: string[]; pending: string[] }
