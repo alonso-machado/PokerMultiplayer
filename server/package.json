@@ -22,5 +22,14 @@
     "@opentelemetry/sdk-metrics": "^2.10.0",
     "@opentelemetry/sdk-node": "^0.218.0",
     "@opentelemetry/semantic-conventions": "^1.43.0"
-  }
+  },
+  "overrides": {
+    "@opentelemetry/propagator-jaeger": "2.10.0",
+    "@opentelemetry/core": "2.10.0",
+    "protobufjs": "7.6.5",
+    "brace-expansion": "2.1.4"
+  },
+  "trustedDependencies": [
+    "protobufjs"
+  ]
 }

@@ -193,3 +193,22 @@ Testes:
 ```sh
 bun test
 ```
+
+## Auditoria de dependências (bun audit)
+
+`bun audit` roda automaticamente no pre-commit (ver `.claude/CLAUDE.md` →
+Regra #3). Vulnerabilidades em dependências transitivas do OpenTelemetry
+foram fixadas via `overrides` no `package.json` — **não remover** sem
+reconfirmar que a versão base (`@opentelemetry/sdk-node` etc.) já resolve
+essas transitivas sozinha:
+
+| Pacote (transitivo) | Via | Corrigido em |
+|---|---|---|
+| `@opentelemetry/propagator-jaeger` | `sdk-node` | `2.10.0` |
+| `@opentelemetry/core` | várias | `2.10.0` |
+| `protobufjs` | `sdk-node` → `exporter-trace-otlp-grpc` → `grpc-js` | `7.6.5` |
+| `brace-expansion` | `auto-instrumentations-node` → ... → `minimatch` | `2.1.4` |
+
+`protobufjs@7.6.5` tem um postinstall script (só imprime um aviso de
+versionamento, sem efeitos colaterais) — já marcado como confiável em
+`trustedDependencies`.

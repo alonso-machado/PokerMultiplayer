@@ -42,6 +42,35 @@ Isso não pode se repetir.
 
 ---
 
+## 🚨 REGRA #3 — Lint (Biome) e auditoria de dependências (bun audit)
+
+Automatizado via git hook (`.githooks/pre-commit`) — roda sozinho a cada
+`git commit`, mas nenhum sub-agente deve tentar contornar ou pular o hook.
+
+**Setup de uma vez por clone** (não persiste automaticamente):
+```sh
+git config core.hooksPath .githooks
+```
+
+| Checagem | Bloqueia o commit? |
+|---|---|
+| `biome check .` — erros | Sim |
+| `biome check .` — warnings | Não (ver `biome.json` para o que foi rebaixado a warning e por quê) |
+| `bun audit` (raiz, `server/`, `front/`) — high/critical | Sim |
+| `bun audit` — moderate/low | Não, só aparece como aviso |
+
+Vulnerabilidades em dependências transitivas são corrigidas via campo
+`overrides` no `package.json` de cada sub-repo (não editar `bun.lock` à mão).
+Ver `.claude/Server.md` / `.claude/Front.md` para o histórico do que já foi
+fixado dessa forma.
+
+`noNonNullAssertion` está desligado no `biome.json` — o operador `!` é usado
+deliberadamente em todo o código (ex.: acesso a array já validado por
+tamanho/bounds antes) e não deve ser "corrigido" para `?.`, que muda
+silenciosamente o tipo de retorno e pode quebrar chamadas downstream.
+
+---
+
 ## Estrutura do projeto
 
 ```
@@ -56,6 +85,8 @@ Isso não pode se repetir.
 │   ├── Lobby.md
 │   ├── Tournament.md
 │   └── BloomFilter.md
+├── .githooks/       Hook de pre-commit (Biome + bun audit) — ver Regra #3
+├── biome.json       Config do linter (Biome) — cobre front/, server/, shared/
 ├── Dockerfile       Build Docker para Render.com (free tier)
 └── render.yaml      Config de deploy no Render
 ```

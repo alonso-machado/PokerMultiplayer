@@ -178,3 +178,15 @@ Build de produção:
 ```sh
 bun run build  # dist/ pronto para Vercel / qualquer CDN
 ```
+
+## Auditoria de dependências (bun audit)
+
+`bun audit` roda automaticamente no pre-commit (ver `.claude/CLAUDE.md` →
+Regra #3). Vulnerabilidades transitivas fixadas via `overrides` no
+`package.json` — **não remover** sem reconfirmar que `posthog-js`/`vite` já
+resolvem essas versões sozinhos:
+
+| Pacote (transitivo) | Via | Corrigido em |
+|---|---|---|
+| `dompurify` | `posthog-js` | `3.4.13` |
+| `postcss` | `vite` | `8.5.26` |
