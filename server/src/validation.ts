@@ -1,4 +1,4 @@
-import type { Card, CanastraMeldPlan, CanastraRoomConfig, ClientMessage, GauchoRoomConfig, PlayerAction, Rank, RoomConfig, Suit, TrucoRoomConfig } from '../../shared/types'
+import type { Card, CanastraMeldPlan, CanastraRoomConfig, ClientMessage, GauchoRoomConfig, GoFishRoomConfig, PlayerAction, Rank, RoomConfig, Suit, TrucoRoomConfig } from '../../shared/types'
 // Blackjack has no room config to validate — see blackjack_join below.
 
 const MAX_PAYLOAD_BYTES = 512
@@ -66,6 +66,14 @@ function parseCanastraConfig(v: unknown): CanastraRoomConfig | null {
   const c = v as Record<string, unknown>
   if (!isString(c.mode) || !VALID_CANASTRA_MODES.has(c.mode)) return null
   return { mode: c.mode as CanastraRoomConfig['mode'] }
+}
+
+function parseGoFishConfig(v: unknown): GoFishRoomConfig | null {
+  if (typeof v !== 'object' || v === null) return null
+  const c = v as Record<string, unknown>
+  const maxPlayers = safeInt(c.maxPlayers, 2, 6)
+  if (maxPlayers === null) return null
+  return { maxPlayers }
 }
 
 function parseIdArray(v: unknown): string[] | null {
@@ -291,6 +299,32 @@ export function parseClientMessage(raw: unknown): ClientMessage | null {
       if (amount === null) return null
       return { type: 'blackjack_insurance_bet', amount }
     }
+
+    // ── Go Fish ──────────────────────────────────────────────────────────
+    case 'gofish_list_rooms': return { type: 'gofish_list_rooms' }
+    case 'gofish_leave_room': return { type: 'gofish_leave_room' }
+    case 'gofish_start_game': return { type: 'gofish_start_game' }
+
+    case 'gofish_create_room': {
+      if (!isSafeRoomName(m.roomName)) return null
+      const config = parseGoFishConfig(m.config)
+      if (!config) return null
+      return { type: 'gofish_create_room', roomName: m.roomName as string, config }
+    }
+
+    case 'gofish_join_room':
+      if (!isSafeId(m.roomId)) return null
+      return { type: 'gofish_join_room', roomId: m.roomId as string }
+
+    case 'gofish_ask': {
+      if (!isSafeId(m.targetPlayerId)) return null
+      if (!isString(m.rank) || !VALID_RANKS.has(m.rank)) return null
+      return { type: 'gofish_ask', targetPlayerId: m.targetPlayerId, rank: m.rank as Rank }
+    }
+
+    case 'gofish_rematch_vote':
+      if (!isBool(m.accept)) return null
+      return { type: 'gofish_rematch_vote', accept: m.accept }
 
     default:
       return null

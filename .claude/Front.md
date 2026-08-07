@@ -156,6 +156,25 @@ duplo repete naipe+valor) e `suit`/`rank` nuláveis pros curingões.
 `CanastraTable` renderiza via um wrapper local (`CanastraCardFace`) que
 cai pro componente `PlayingCard` normal quando não é curingão.
 
+## Go Fish
+
+Aba separada (`🎣 Go Fish` no seletor de jogo). Estado isolado via
+`useGoFishGame` (`hooks/useGoFishGame.ts`), um `useReducer` que recebe
+qualquer `ServerMessage` cujo `type` comece com `gofish_` (roteado no
+`default:` do switch principal do `App.tsx`, mesmo padrão do
+Truco/Gaúcho/Canastra).
+
+- `GoFishLobby.tsx` — criar/listar mesas (nome + máximo de jogadores 2-6).
+- `GoFishTable.tsx` — mesa: oponentes clicáveis como alvo do pedido (nome,
+  contagem de cartas, baralhos formados, turno em destaque), monte, minha
+  mão renderizada com `PlayingCard` comum (sem wrapper — Go Fish usa o tipo
+  `Card` normal, não precisa de um tipo de carta próprio como a Canastra),
+  botões de valor deduplicados da mão pra escolher o pedido, log transiente
+  do último pedido (`gofish_ask_result`), overlay de fim de partida com
+  baralhos por jogador e votação de revanche.
+- `GoFishGuide.tsx` — painel de regras (reutiliza o shell CSS
+  `.hand-guide-*` do `HandGuide.tsx`).
+
 ## Observabilidade (Front)
 
 Observabilidade client-side é feita via **PostHog**:

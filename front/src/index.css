@@ -798,3 +798,15 @@ input:focus { border-color: var(--gold); }
 .bj-bet-bar input { width: 90px; padding: 0.4rem 0.5rem; border-radius: 6px; border: 1px solid var(--border); background: #0d1f14; color: var(--text); font-size: 0.9rem; }
 .bj-error { color: #e07070; }
 .bj-lobby-stats { color: var(--gold-light); font-weight: 600; margin-bottom: 0.6rem; }
+
+/* ── Go Fish (reuses the .truco-table/.action-bar shell) ──────────────────── */
+.gf-player-badge { cursor: default; }
+.gf-player-badge:disabled { opacity: 0.85; }
+.gf-player-badge:not(:disabled) { cursor: pointer; border-color: var(--gold); }
+.gf-player-badge:not(:disabled):hover { box-shadow: 0 0 10px rgba(201,168,76,0.5); }
+.gf-out { opacity: 0.45; }
+.gf-stock { display: flex; flex-direction: column; align-items: center; gap: 0.3rem; }
+.gf-log { text-align: center; font-size: 0.82rem; color: var(--gold-light); background: rgba(201,168,76,0.1); border-radius: 8px; padding: 0.4rem 0.7rem; margin: 0 auto; max-width: 90%; }
+.gf-my-books { display: flex; gap: 0.4rem; flex-wrap: wrap; justify-content: center; }
+.gf-book-badge { font-size: 0.72rem; font-weight: 700; color: var(--gold-light); background: rgba(201,168,76,0.12); border-radius: 8px; padding: 0.15rem 0.5rem; }
+.gf-rank-row { flex-wrap: wrap; }

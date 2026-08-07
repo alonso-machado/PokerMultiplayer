@@ -136,6 +136,8 @@ export type ClientMessage =
   | CanastraClientMessage
   // Blackjack / 21 (see below)
   | BlackjackClientMessage
+  // Go Fish (see below)
+  | GoFishClientMessage
 
 // ─── WebSocket: Server → Client ───────────────────────────────────────────────
 
@@ -196,6 +198,8 @@ export type ServerMessage =
   | CanastraServerMessage
   // ── Blackjack / 21 (see below) ────────────────────────────────────────────
   | BlackjackServerMessage
+  // ── Go Fish (see below) ───────────────────────────────────────────────────
+  | GoFishServerMessage
 
 export interface ShowdownResult {
   playerId: string
@@ -692,3 +696,91 @@ export type BlackjackServerMessage =
   /** Broadcast (lobby-wide, not per-table) — how many tables/players exist right
    *  now, so the lobby can show activity without a full room list to browse. */
   | { type: 'blackjack_lobby_stats'; tableCount: number; playerCount: number }
+
+// ─── Go Fish ────────────────────────────────────────────────────────────────
+// See .claude/GoFish.md for the full rules this section's types model.
+// Rules source: https://bicyclecards.com/how-to-play/go-fish — the only
+// ruleset used for this game (same policy as Blackjack.md — no house
+// variants consulted). Reuses the plain `Card`/`Rank` types above (single
+// 52-card deck, no duplicates, unlike Canastra's double deck) — no separate
+// card shape needed. Architecturally closest to Canastra: free room
+// creation, one "match" = one game played to completion, then a rematch
+// vote — but no teams, and a variable 2-6 player count instead of a fixed
+// 1x1/2x2 mode.
+
+export interface GoFishRoomConfig {
+  maxPlayers: number   // 2–6
+}
+
+export interface GoFishRoomSummary {
+  id: string
+  name: string
+  creatorName: string
+  playerCount: number
+  maxPlayers: number
+  status: RoomStatus
+  config: GoFishRoomConfig
+}
+
+/** 'out' = ran out of cards while the stock was also empty — skipped in turn
+ *  rotation for the rest of the round (see .claude/GoFish.md). */
+export type GoFishPlayerStatus = 'waiting' | 'active' | 'out' | 'disconnected'
+
+export interface GoFishPlayer {
+  id: string
+  name: string
+  status: GoFishPlayerStatus
+  handCount: number      // card count only — actual cards are private
+  books: Rank[]          // ranks this player has already completed a book of
+}
+
+export type GoFishPhase = 'waiting' | 'playing' | 'round_end'
+
+export interface GoFishTableState {
+  phase: GoFishPhase
+  stockCount: number
+  turnPlayerId: string | null
+}
+
+// ─── WebSocket: Client → Server (Go Fish) ──────────────────────────────────
+
+export type GoFishClientMessage =
+  | { type: 'gofish_list_rooms' }
+  | { type: 'gofish_create_room'; roomName: string; config: GoFishRoomConfig }
+  | { type: 'gofish_join_room'; roomId: string }
+  | { type: 'gofish_leave_room' }
+  | { type: 'gofish_start_game' }   // manual fallback — mirrors the lobby's start_game
+  | { type: 'gofish_ask'; targetPlayerId: string; rank: Rank }
+  | { type: 'gofish_rematch_vote'; accept: boolean }
+
+// ─── WebSocket: Server → Client (Go Fish) ──────────────────────────────────
+
+export type GoFishServerMessage =
+  | { type: 'gofish_room_list'; rooms: GoFishRoomSummary[] }
+  | { type: 'gofish_room_joined'; roomId: string; roomName: string; config: GoFishRoomConfig; yourId: string }
+  | { type: 'gofish_room_left'; reason?: 'manual' | 'expired' | 'abandoned' | 'rematch_declined' }
+  | { type: 'gofish_room_error'; message: string }
+  | { type: 'gofish_player_list'; players: GoFishPlayer[] }
+  | { type: 'gofish_game_started' }
+  /** Private — sent only to the receiving player at the start of the round */
+  | { type: 'gofish_hand_dealt'; yourCards: Card[]; players: GoFishPlayer[]; tableState: GoFishTableState }
+  /** Private — sent only to the player(s) whose hand changed by an action */
+  | { type: 'gofish_hand_update'; cards: Card[] }
+  /** Broadcast — public table state changed (turn advanced, stock drawn, book completed) */
+  | { type: 'gofish_state_update'; players: GoFishPlayer[]; tableState: GoFishTableState }
+  /** Broadcast — narrates the outcome of an ask without leaking anyone's hand contents.
+   *  drawnMatch = true when a "go fish" stock draw happened to match the asked rank
+   *  (counts as a catch — see .claude/GoFish.md → gap #1). */
+  | {
+      type: 'gofish_ask_result'
+      askerId: string; targetId: string; rank: Rank
+      cardsTransferred: number; wentFish: boolean; drawnMatch: boolean
+      booksCompleted: { playerId: string; rank: Rank }[]
+    }
+  /** Private — sent to the player whose turn it is; ranks they're allowed to ask for
+   *  (must hold at least one card of that rank — see .claude/GoFish.md). */
+  | { type: 'gofish_your_turn'; askableRanks: Rank[]; timeoutSeconds: number }
+  /** Broadcast — the round (= the whole match) ended, via 13 books or too few players left to continue */
+  | { type: 'gofish_round_end'; players: GoFishPlayer[]; tableState: GoFishTableState; winnerIds: string[]; matchWins: Record<string, number> }
+  /** Broadcast — rematch vote progress */
+  | { type: 'gofish_rematch_status'; accepted: string[]; pending: string[] }

@@ -10,6 +10,7 @@ import { useTrucoGame } from './hooks/useTrucoGame'
 import { useGauchoGame } from './hooks/useGauchoGame'
 import { useCanastraGame } from './hooks/useCanastraGame'
 import { useBlackjackGame } from './hooks/useBlackjackGame'
+import { useGoFishGame } from './hooks/useGoFishGame'
 import { getOrCreateIdentity, saveName, saveIdentityToken, saveTournamentToken, clearTournamentToken } from './hooks/usePlayerToken'
 import { Lobby } from './components/Lobby'
 import { TournamentTab } from './components/TournamentTab'
@@ -22,13 +23,15 @@ import { CanastraLobby } from './components/CanastraLobby'
 import { CanastraTable } from './components/CanastraTable'
 import { BlackjackLobby } from './components/BlackjackLobby'
 import { BlackjackTable } from './components/BlackjackTable'
+import { GoFishLobby } from './components/GoFishLobby'
+import { GoFishTable } from './components/GoFishTable'
 import { HandGuide } from './components/HandGuide'
 import { AdminPage } from './pages/AdminPage'
-import type { TrucoRoomSummary, GauchoRoomSummary, CanastraRoomSummary } from '../../shared/types'
+import type { TrucoRoomSummary, GauchoRoomSummary, CanastraRoomSummary, GoFishRoomSummary } from '../../shared/types'
 
 interface TurnState { validActions: PlayerAction[]; callAmount: number; minRaise: number }
 interface ShowdownEntry { playerId: string; playerName: string; cards: Card[]; bestCards: Card[]; handName: string; won: number }
-type GameGroup = 'poker' | 'truco' | 'gaucho' | 'canastra' | 'blackjack'
+type GameGroup = 'poker' | 'truco' | 'gaucho' | 'canastra' | 'blackjack' | 'gofish'
 type PokerTab = 'rooms' | 'tournament'
 
 const identity = getOrCreateIdentity()
@@ -55,6 +58,8 @@ function AppInner() {
   const { canastraState, handleCanastraMessage } = useCanastraGame(identity.playerId)
   const { blackjackState, handleBlackjackMessage } = useBlackjackGame(identity.playerId)
   const [blackjackStats, setBlackjackStats] = useState({ tableCount: 0, playerCount: 0 })
+  const [gofishRooms, setGofishRooms] = useState<GoFishRoomSummary[]>([])
+  const { gofishState, handleGoFishMessage } = useGoFishGame(identity.playerId)
 
   // Tournament
   const [tournamentInfo,       setTournamentInfo]       = useState<TournamentInfo | null>(null)
@@ -96,6 +101,7 @@ function AppInner() {
       case 'gaucho_room_list': setGauchoRooms(msg.rooms); break
       case 'canastra_room_list': setCanastraRooms(msg.rooms); break
       case 'blackjack_lobby_stats': setBlackjackStats({ tableCount: msg.tableCount, playerCount: msg.playerCount }); break
+      case 'gofish_room_list': setGofishRooms(msg.rooms); break
       case 'tournament_info':
         // A brand-new tournament (different id) means our previous registration
         // token is stale — let the player register again for this one.
@@ -218,9 +224,10 @@ function AppInner() {
         else if (msg.type.startsWith('gaucho_')) handleGauchoMessage(msg)
         else if (msg.type.startsWith('canastra_')) handleCanastraMessage(msg)
         else if (msg.type.startsWith('blackjack_')) handleBlackjackMessage(msg)
+        else if (msg.type.startsWith('gofish_')) handleGoFishMessage(msg)
         break
     }
-  }, [posthog?.capture, handleTrucoMessage, handleGauchoMessage, handleCanastraMessage, handleBlackjackMessage])
+  }, [posthog?.capture, handleTrucoMessage, handleGauchoMessage, handleCanastraMessage, handleBlackjackMessage, handleGoFishMessage])
 
   const { send } = useSocket(identity, handleMessage)
 
@@ -259,6 +266,29 @@ function AppInner() {
         onStand={() => send({ type: 'blackjack_stand' })}
         onDouble={() => send({ type: 'blackjack_double' })}
         onSplit={() => send({ type: 'blackjack_split' })}
+      />
+    )
+  }
+
+  if (gofishState.roomId && gofishState.config) {
+    return (
+      <GoFishTable
+        myId={gofishState.myId}
+        roomName={gofishState.roomName}
+        config={gofishState.config}
+        players={gofishState.players}
+        tableState={gofishState.tableState}
+        myCards={gofishState.myCards}
+        isStarted={gofishState.isStarted}
+        turnDeadline={gofishState.turnDeadline}
+        askableRanks={gofishState.turn?.askableRanks ?? []}
+        lastAsk={gofishState.lastAsk}
+        roundEnd={gofishState.roundEnd}
+        rematch={gofishState.rematch}
+        onLeave={() => send({ type: 'gofish_leave_room' })}
+        onStartGame={() => send({ type: 'gofish_start_game' })}
+        onAsk={(targetPlayerId, rank) => send({ type: 'gofish_ask', targetPlayerId, rank })}
+        onRematchVote={(accept) => send({ type: 'gofish_rematch_vote', accept })}
       />
     )
   }
@@ -384,14 +414,16 @@ function AppInner() {
           : activeGame === 'truco' ? '🂡 Truco'
           : activeGame === 'gaucho' ? '🧉 Truco Gaúcho'
           : activeGame === 'canastra' ? '🎴 Canastra / Buraco'
-          : '🂡 Blackjack / 21'}
+          : activeGame === 'blackjack' ? '🂡 Blackjack / 21'
+          : '🎣 Go Fish'}
       </h1>
       <p className="subtitle">
         {activeGame === 'poker' ? 'Poker multiplayer em tempo real'
           : activeGame === 'truco' ? 'Truco multiplayer — Paulista ou Mineiro'
           : activeGame === 'gaucho' ? 'Truco Gaúcho / Espanhol — com Envido e Flor'
           : activeGame === 'canastra' ? 'Canastra / Buraco multiplayer — 1x1 ou 2x2'
-          : 'Blackjack / 21 — você contra o dealer, até 7 na mesa'}
+          : activeGame === 'blackjack' ? 'Blackjack / 21 — você contra o dealer, até 7 na mesa'
+          : 'Go Fish multiplayer — 2 a 6 jogadores, forme os 13 baralhos'}
       </p>
       <NameRow name={myName} onSave={setMyName} />
 
@@ -401,6 +433,7 @@ function AppInner() {
         <button type="button" className={`tab${activeGame === 'gaucho' ? ' active' : ''}`} onClick={() => setActiveGame('gaucho')}>🧉 Truco Gaúcho</button>
         <button type="button" className={`tab${activeGame === 'canastra' ? ' active' : ''}`} onClick={() => setActiveGame('canastra')}>🎴 Canastra</button>
         <button type="button" className={`tab${activeGame === 'blackjack' ? ' active' : ''}`} onClick={() => setActiveGame('blackjack')}>🂡 Blackjack / 21</button>
+        <button type="button" className={`tab${activeGame === 'gofish' ? ' active' : ''}`} onClick={() => setActiveGame('gofish')}>🎣 Go Fish</button>
       </div>
 
       {activeGame === 'poker' && (
@@ -461,6 +494,14 @@ function AppInner() {
 
       {activeGame === 'blackjack' && (
         <BlackjackLobby stats={blackjackStats} onJoin={() => send({ type: 'blackjack_join' })} />
+      )}
+
+      {activeGame === 'gofish' && (
+        <GoFishLobby
+          rooms={gofishRooms}
+          onCreateRoom={(name, cfg) => send({ type: 'gofish_create_room', roomName: name, config: cfg })}
+          onJoinRoom={(id) => send({ type: 'gofish_join_room', roomId: id })}
+        />
       )}
     </div>
     <HandGuide />

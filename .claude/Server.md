@@ -112,6 +112,28 @@ mãos até uma pontuação alvo).
   `session.canastraRoomId` + `currentCanastraRoom()`, espelhando
   `currentTrucoRoom()`/`currentGauchoRoom()`.
 
+## Go Fish
+
+Sistema totalmente paralelo, mesmo padrão da Canastra — não compartilha
+`Room` nem estado com os outros jogos. Ver `.claude/GoFish.md` para as
+regras. Diferenças de arquitetura em relação à Canastra: sem times, sem
+tipo de carta próprio (reusa `Card`/`Rank` de `shared/types.ts` — baralho
+único de 52, sem duplicatas), e a mesa **não** espera lotar pra começar —
+segue o padrão de auto-start do lobby de Poker/Truco (300ms após o 2º
+jogador entrar, com `gofish_start_game` manual como fallback).
+
+- `gofish/gameEngine.ts` (`GoFishGame`) — reusa `createDeck`/`shuffle` de
+  `poker/deck.ts` diretamente (mesmo baralho de 52, sem duplicar código).
+  Máquina de estados de uma partida: mãos, monte, baralhos formados, pedir
+  (`ask`) com toda a lógica de pegada/pescaria/continuação de turno, compra
+  automática de mão vazia, eliminação por "fora da partida".
+- `gofishRoom.ts` (`GoFishRoom`) — assentos, ciclo da partida, votação de
+  revanche, timeout de turno (`GOFISH_TIMEOUT`, default 30s — pedido às
+  cegas de um valor aleatório da mão a um oponente aleatório ainda em jogo).
+- `index.ts`: `gofishRooms` é um `Map` separado; roteamento via
+  `session.gofishRoomId` + `currentGoFishRoom()`, espelhando
+  `currentCanastraRoom()`.
+
 ## Rotas HTTP
 
 | Método | Path | Auth | Descrição |
