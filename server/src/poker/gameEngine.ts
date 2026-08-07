@@ -252,7 +252,7 @@ export class PokerGame {
 
     // Advance to next 'active' player, using this.players as the stable seat array
     let next = (this._currentPlayerIndex + 1) % this.players.length
-    while (this.players[next]!.status !== 'active') {
+    while (this.players[next]?.status !== 'active') {
       next = (next + 1) % this.players.length
     }
     this._currentPlayerIndex = next
@@ -297,7 +297,7 @@ export class PokerGame {
       // _dealerIndex is an index into this.players
       let first = (this._dealerIndex + 1) % this.players.length
       let loops = 0
-      while (this.players[first]!.status !== 'active') {
+      while (this.players[first]?.status !== 'active') {
         first = (first + 1) % this.players.length
         if (++loops > this.players.length) break
       }

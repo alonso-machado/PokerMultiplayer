@@ -70,9 +70,9 @@ describe('GameEngine — 4 players', () => {
     const ts = g.tableState
 
     expect(ts.phase).toBe('preflop')
-    expect(g.players[0]!.isDealer).toBe(true)      // Alice = BTN (dealerIndex=0)
-    expect(g.players[1]!.isSmallBlind).toBe(true)   // Bob = SB
-    expect(g.players[2]!.isBigBlind).toBe(true)     // Charlie = BB
+    expect(g.players[0]?.isDealer).toBe(true)      // Alice = BTN (dealerIndex=0)
+    expect(g.players[1]?.isSmallBlind).toBe(true)   // Bob = SB
+    expect(g.players[2]?.isBigBlind).toBe(true)     // Charlie = BB
   })
 
   test('ante: only UTG (Dave) pays dead ante; his bet stays 0', () => {

@@ -324,7 +324,7 @@ export class Tournament {
     if (remaining.length !== 1) return
     remaining[0]!.rank = 1
     this.status = 'finished'
-    this.broadcastAll({ type: 'tournament_finished', winnerId: remaining[0]!.id, winnerName: remaining[0]!.name })
+    this.broadcastAll({ type: 'tournament_finished', winnerId: remaining[0]?.id, winnerName: remaining[0]?.name })
     this.onFinished(this.id)
   }
 

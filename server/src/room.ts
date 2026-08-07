@@ -216,7 +216,6 @@ export class Room {
   handleAction(pid: string, action: PlayerAction, amount?: number): void {
     // Snapshot community cards BEFORE the action so we can detect new cards dealt
     const prevCommunityLen = this.game.tableState.communityCards.length
-    const prevPhase        = this.game.tableState.phase
 
     const ok = this.game.applyAction(pid, action, amount)
     if (!ok) {
@@ -231,7 +230,6 @@ export class Room {
     }
 
     const newState  = this.game.tableState
-    const newPhase  = newState.phase
 
     // Always broadcast the action result (bets, pot, player states)
     this.broadcastAll({

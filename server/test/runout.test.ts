@@ -22,7 +22,7 @@ describe('Run-it-out — all community cards dealt when everyone is all-in', () 
     g.startHand()
 
     // Both go all-in preflop
-    const first = g.currentPlayer()!.id
+    const first = g.currentPlayer()?.id
     expect(g.applyAction(first,   'all-in')).toBe(true)
     const second = first === 'alice' ? 'bob' : 'alice'
     expect(g.applyAction(second, 'all-in')).toBe(true)  // or call, doesn't matter
@@ -40,18 +40,18 @@ describe('Run-it-out — all community cards dealt when everyone is all-in', () 
     g.startHand()
 
     // Preflop: call around so we reach flop
-    const utg = g.currentPlayer()!.id
+    const utg = g.currentPlayer()?.id
     expect(g.applyAction(utg, 'call')).toBe(true)
-    const bb = g.currentPlayer()!.id
+    const bb = g.currentPlayer()?.id
     expect(g.applyAction(bb, 'check')).toBe(true)
 
     expect(g.tableState.phase).toBe('flop')
     expect(g.tableState.communityCards).toHaveLength(3)
 
     // Flop: both go all-in
-    const first = g.currentPlayer()!.id
+    const first = g.currentPlayer()?.id
     expect(g.applyAction(first, 'all-in')).toBe(true)
-    const second = g.currentPlayer()!.id
+    const second = g.currentPlayer()?.id
     expect(g.applyAction(second, 'all-in')).toBe(true)
 
     expect(g.tableState.phase).toBe('showdown')
@@ -66,20 +66,20 @@ describe('Run-it-out — all community cards dealt when everyone is all-in', () 
     g.startHand()
 
     // Reach turn with checks
-    const utg = g.currentPlayer()!.id
+    const utg = g.currentPlayer()?.id
     g.applyAction(utg, 'call')
-    const bb = g.currentPlayer()!.id
+    const bb = g.currentPlayer()?.id
     g.applyAction(bb, 'check')
     expect(g.tableState.phase).toBe('flop')
 
-    g.applyAction(g.currentPlayer()!.id, 'check')
-    g.applyAction(g.currentPlayer()!.id, 'check')
+    g.applyAction(g.currentPlayer()?.id, 'check')
+    g.applyAction(g.currentPlayer()?.id, 'check')
     expect(g.tableState.phase).toBe('turn')
     expect(g.tableState.communityCards).toHaveLength(4)
 
     // Turn: both go all-in
-    g.applyAction(g.currentPlayer()!.id, 'all-in')
-    g.applyAction(g.currentPlayer()!.id, 'all-in')
+    g.applyAction(g.currentPlayer()?.id, 'all-in')
+    g.applyAction(g.currentPlayer()?.id, 'all-in')
 
     expect(g.tableState.phase).toBe('showdown')
     expect(g.tableState.communityCards).toHaveLength(5)
@@ -93,9 +93,9 @@ describe('Run-it-out — all community cards dealt when everyone is all-in', () 
 
     const totalChipsBefore = g.players.reduce((s, p) => s + p.chips, 0) + g.tableState.pot
 
-    const first = g.currentPlayer()!.id
+    const first = g.currentPlayer()?.id
     g.applyAction(first, 'all-in')
-    g.applyAction(g.currentPlayer()!.id, 'all-in')
+    g.applyAction(g.currentPlayer()?.id, 'all-in')
 
     // Resolve and verify chips are conserved
     const result = g.resolveShowdown()

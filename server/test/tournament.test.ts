@@ -119,7 +119,7 @@ describe('Tournament — 10-player multi-table all-in playthrough', () => {
     }
 
     // tournament_finished names the actual winner
-    const finishedMsg = players[0]!.messages.find(m => m.type === 'tournament_finished') as Extract<ServerMessage, { type: 'tournament_finished' }>
+    const finishedMsg = players[0]?.messages.find(m => m.type === 'tournament_finished') as Extract<ServerMessage, { type: 'tournament_finished' }>
     expect(finishedMsg.winnerId).toBe(winner.id)
   }, 20000)
 })
@@ -144,14 +144,14 @@ describe('Tournament — same-hand elimination tie-break', () => {
     const ranking = tournament.getRanking()
     const byId = new Map(ranking.map(r => [r.id, r]))
 
-    expect(byId.get('p1')!.rank).toBe(4) // lowest totalBet -> worst rank
-    expect(byId.get('p3')!.rank).toBe(3)
-    expect(byId.get('p2')!.rank).toBe(2) // highest totalBet -> best rank among bustouts
-    expect(byId.get('p4')!.rank).toBe(1) // sole survivor -> winner
+    expect(byId.get('p1')?.rank).toBe(4) // lowest totalBet -> worst rank
+    expect(byId.get('p3')?.rank).toBe(3)
+    expect(byId.get('p2')?.rank).toBe(2) // highest totalBet -> best rank among bustouts
+    expect(byId.get('p4')?.rank).toBe(1) // sole survivor -> winner
 
     // All four busted players (and the survivor) share the same eliminatedAt
     // batch timestamp for p1/p2/p3
-    const elimTimes = ['p1', 'p2', 'p3'].map(id => byId.get(id)!.eliminatedAt)
+    const elimTimes = ['p1', 'p2', 'p3'].map(id => byId.get(id)?.eliminatedAt)
     expect(new Set(elimTimes).size).toBe(1)
 
     expect(tournament.status).toBe('finished')

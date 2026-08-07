@@ -76,7 +76,7 @@ export function TrucoTable({
           <strong>{roomName}</strong>
           <span className="hint"> · {config.mode === '1x1' ? '1x1' : '2x2 (duplas)'} · {config.manilhaVariant === 'vira' ? 'Vira (Paulista)' : 'Fixa (Mineiro)'}</span>
         </div>
-        <button className="btn-cancel-small" onClick={onLeave}>Sair da mesa</button>
+        <button type="button" className="btn-cancel-small" onClick={onLeave}>Sair da mesa</button>
       </div>
 
       {!isStarted && <div className="empty-rooms">Aguardando jogadores...</div>}
@@ -164,7 +164,7 @@ export function TrucoTable({
           <div className={`truco-my-area${canPlay || canRespond ? ' active-turn' : ''}`}>
             <div className="truco-hand">
               {myCards.map((c, i) => (
-                <button key={i} className="truco-hand-card" disabled={!canPlay} onClick={() => onPlayCard(c)}>
+                <button type="button" key={i} className="truco-hand-card" disabled={!canPlay} onClick={() => onPlayCard(c)}>
                   <PlayingCard card={c} width={56} />
                 </button>
               ))}
@@ -179,16 +179,16 @@ export function TrucoTable({
                 <>
                   <span className="hint">Truco chamado! Você aceita?</span>
                   <div className="truco-respond-row">
-                    <button className="btn-fold" onClick={() => onRespond(false)}>Não quero</button>
-                    <button className="btn-call" onClick={() => onRespond(true)}>Quero</button>
+                    <button type="button" className="btn-fold" onClick={() => onRespond(false)}>Não quero</button>
+                    <button type="button" className="btn-call" onClick={() => onRespond(true)}>Quero</button>
                     {canCallTruco && nextLevel && (
-                      <button className="btn-raise" onClick={onCallTruco}>{CALL_LABEL[nextLevel]}</button>
+                      <button type="button" className="btn-raise" onClick={onCallTruco}>{CALL_LABEL[nextLevel]}</button>
                     )}
                   </div>
                 </>
               )}
               {!canRespond && canCallTruco && nextLevel && (
-                <button className="btn-raise" onClick={onCallTruco}>{CALL_LABEL[nextLevel]}</button>
+                <button type="button" className="btn-raise" onClick={onCallTruco}>{CALL_LABEL[nextLevel]}</button>
               )}
             </div>
           </div>
@@ -215,8 +215,8 @@ export function TrucoTable({
               {maoDeOnzePrompt.teamCards.map((c, i) => <PlayingCard key={i} card={c} width={48} />)}
             </div>
             <div className="actions">
-              <button className="btn-cancel" onClick={() => onMaoDeOnzeDecision(false)}>Correr</button>
-              <button className="btn-confirm" onClick={() => onMaoDeOnzeDecision(true)}>Jogar</button>
+              <button type="button" className="btn-cancel" onClick={() => onMaoDeOnzeDecision(false)}>Correr</button>
+              <button type="button" className="btn-confirm" onClick={() => onMaoDeOnzeDecision(true)}>Jogar</button>
             </div>
           </div>
         </div>
@@ -237,8 +237,8 @@ export function TrucoTable({
             </div>
             {rematch && <p className="hint">Aguardando: {rematch.pending.length} jogador(es)...</p>}
             <div className="actions">
-              <button className="btn-cancel" onClick={() => onRematchVote(false)}>Sair</button>
-              <button className="btn-confirm" onClick={() => onRematchVote(true)}>Jogar novamente</button>
+              <button type="button" className="btn-cancel" onClick={() => onRematchVote(false)}>Sair</button>
+              <button type="button" className="btn-confirm" onClick={() => onRematchVote(true)}>Jogar novamente</button>
             </div>
           </div>
         </div>

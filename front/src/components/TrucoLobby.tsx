@@ -25,7 +25,7 @@ export function TrucoLobby({ rooms, onCreateRoom, onJoinRoom }: Props) {
     <>
       <div className="rooms-header">
         <h2>Mesas de Truco</h2>
-        <button className="btn-create" onClick={() => setShowCreate(true)}>+ Criar mesa</button>
+        <button type="button" className="btn-create" onClick={() => setShowCreate(true)}>+ Criar mesa</button>
       </div>
 
       <div className="room-list">
@@ -49,7 +49,7 @@ export function TrucoLobby({ rooms, onCreateRoom, onJoinRoom }: Props) {
                   <span className="player-count">{room.playerCount}/{room.maxPlayers}</span>
                 </div>
               </div>
-              <button className="btn-join" onClick={() => onJoinRoom(room.id)} disabled={full || playing}>
+              <button type="button" className="btn-join" onClick={() => onJoinRoom(room.id)} disabled={full || playing}>
                 {full ? 'Cheia' : playing ? 'Em jogo' : 'Entrar na Mesa'}
               </button>
             </div>
@@ -91,8 +91,8 @@ export function TrucoLobby({ rooms, onCreateRoom, onJoinRoom }: Props) {
             </div>
 
             <div className="actions">
-              <button className="btn-cancel" onClick={() => setShowCreate(false)}>Cancelar</button>
-              <button className="btn-confirm" onClick={handleCreate}>Criar mesa</button>
+              <button type="button" className="btn-cancel" onClick={() => setShowCreate(false)}>Cancelar</button>
+              <button type="button" className="btn-confirm" onClick={handleCreate}>Criar mesa</button>
             </div>
           </div>
         </div>

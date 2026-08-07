@@ -168,7 +168,7 @@ export function PokerTable({
         )}
 
         {!isTournament && (
-          <button className="btn-leave" onClick={onLeave}>Sair da mesa</button>
+          <button type="button" className="btn-leave" onClick={onLeave}>Sair da mesa</button>
         )}
       </div>
 
@@ -272,8 +272,8 @@ export function PokerTable({
                   <div className="rebuy-bar" style={{ width: `${(rebuyCountdown / 60) * 100}%` }} />
                 </div>
                 <div className="rebuy-actions">
-                  <button className="btn-rebuy-yes" onClick={onRebuy}>♻ Rebuy ({rebuyPrompt.startingChips.toLocaleString()})</button>
-                  <button className="btn-rebuy-no"  onClick={onRebuyDecline}>Sair da mesa</button>
+                  <button type="button" className="btn-rebuy-yes" onClick={onRebuy}>♻ Rebuy ({rebuyPrompt.startingChips.toLocaleString()})</button>
+                  <button type="button" className="btn-rebuy-no"  onClick={onRebuyDecline}>Sair da mesa</button>
                 </div>
               </div>
             </div>
@@ -298,7 +298,7 @@ export function PokerTable({
             {isAway ? (
               <>
                 <span className="away-label">⏸ Afastado — auto-fold ativo</span>
-                <button className="btn-back" onClick={onSetBack}>Voltar à mesa</button>
+                <button type="button" className="btn-back" onClick={onSetBack}>Voltar à mesa</button>
               </>
             ) : (
               <div className="my-cards-hand">
@@ -326,7 +326,7 @@ export function PokerTable({
             <div className="action-btns">
 
               {/* Fold — always available; pre-action when not my turn */}
-              <button
+              <button type="button"
                 className={`btn-fold${!myTurn && preAction === 'fold' ? ' pre-selected' : ''}`}
                 onClick={() => {
                   if (myTurn) { onAction('fold') }
@@ -338,7 +338,7 @@ export function PokerTable({
 
               {/* Check — pre-action when not my turn; hidden on my turn if not valid */}
               {(!myTurn || validActions.includes('check')) && (
-                <button
+                <button type="button"
                   className={`btn-check${!myTurn && preAction === 'check' ? ' pre-selected' : ''}`}
                   onClick={() => {
                     if (myTurn) { onAction('check') }
@@ -351,21 +351,21 @@ export function PokerTable({
 
               {/* Call — real action only, shown on my turn */}
               {myTurn && validActions.includes('call') && (
-                <button className="btn-call" onClick={() => onAction('call')}>
+                <button type="button" className="btn-call" onClick={() => onAction('call')}>
                   Call{callAmount > 0 ? ` ${callAmount.toLocaleString()}` : ''}
                 </button>
               )}
 
               {/* Raise — real action only, shown on my turn */}
               {myTurn && validActions.includes('raise') && (
-                <button className="btn-raise" onClick={() => onAction('raise', Math.max(raiseAmount, effectiveMin))}>
+                <button type="button" className="btn-raise" onClick={() => onAction('raise', Math.max(raiseAmount, effectiveMin))}>
                   Raise {Math.max(raiseAmount, effectiveMin).toLocaleString()}
                 </button>
               )}
 
               {/* All-in — always available; pre-action when not my turn */}
               {(myTurn ? validActions.includes('all-in') : myChips > 0) && (
-                <button
+                <button type="button"
                   className={`btn-allin${!myTurn && preAction === 'all-in' ? ' pre-selected' : ''}`}
                   onClick={() => {
                     if (myTurn) { onAction('all-in') }
@@ -377,7 +377,7 @@ export function PokerTable({
               )}
 
               {isTournament && myTurn && (
-                <button className="btn-away" onClick={onSetAway}>⏸ Levantar</button>
+                <button type="button" className="btn-away" onClick={onSetAway}>⏸ Levantar</button>
               )}
             </div>
 
@@ -399,7 +399,7 @@ export function PokerTable({
                   {currentPlayer ? `Vez de ${currentPlayer.name}…` : 'Aguardando próxima mão…'}
                 </span>
                 {isTournament && myChips > 0 && (
-                  <button className="btn-away" onClick={onSetAway}>⏸ Levantar</button>
+                  <button type="button" className="btn-away" onClick={onSetAway}>⏸ Levantar</button>
                 )}
               </div>
             )}

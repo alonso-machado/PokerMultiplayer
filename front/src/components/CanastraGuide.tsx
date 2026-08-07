@@ -7,7 +7,7 @@ export function CanastraGuide() {
 
   return (
     <>
-      <button
+      <button type="button"
         className={`hand-guide-toggle${open ? ' active' : ''}`}
         onClick={() => setOpen((v) => !v)}
         title="Regras da Canastra / Buraco"

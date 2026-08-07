@@ -134,7 +134,7 @@ export function GauchoTable({
           <strong>{roomName}</strong>
           <span className="hint"> · Truco Gaúcho · {config.mode === '1x1' ? '1x1' : '2x2 (duplas)'}</span>
         </div>
-        <button className="btn-cancel-small" onClick={onLeave}>Sair da mesa</button>
+        <button type="button" className="btn-cancel-small" onClick={onLeave}>Sair da mesa</button>
       </div>
 
       {!isStarted && <div className="empty-rooms">Aguardando jogadores...</div>}
@@ -212,7 +212,7 @@ export function GauchoTable({
           <div className={`truco-my-area${canPlay || anyResponsePending ? ' active-turn' : ''}`}>
             <div className="truco-hand">
               {myCards.map((c, i) => (
-                <button key={i} className="truco-hand-card" disabled={!canPlay} onClick={() => onPlayCard(c)}>
+                <button type="button" key={i} className="truco-hand-card" disabled={!canPlay} onClick={() => onPlayCard(c)}>
                   <PlayingCard card={c} width={56} />
                 </button>
               ))}
@@ -227,9 +227,9 @@ export function GauchoTable({
                 <>
                   <span className="hint">Truco chamado! Você aceita?</span>
                   <div className="truco-respond-row">
-                    <button className="btn-fold" onClick={() => onRespondTruco(false)}>Não quero</button>
-                    <button className="btn-call" onClick={() => onRespondTruco(true)}>Quero</button>
-                    {canCallTruco && trucoNext && <button className="btn-raise" onClick={onCallTruco}>{TRUCO_LABEL[trucoNext]}</button>}
+                    <button type="button" className="btn-fold" onClick={() => onRespondTruco(false)}>Não quero</button>
+                    <button type="button" className="btn-call" onClick={() => onRespondTruco(true)}>Quero</button>
+                    {canCallTruco && trucoNext && <button type="button" className="btn-raise" onClick={onCallTruco}>{TRUCO_LABEL[trucoNext]}</button>}
                   </div>
                 </>
               )}
@@ -237,9 +237,9 @@ export function GauchoTable({
                 <>
                   <span className="hint">Envido chamado! Você aceita?</span>
                   <div className="truco-respond-row">
-                    <button className="btn-fold" onClick={() => onRespondEnvido(false)}>Não quero</button>
-                    <button className="btn-call" onClick={() => onRespondEnvido(true)}>Quero</button>
-                    {canCallEnvido && envidoNext && <button className="btn-raise" onClick={onCallEnvido}>{ENVIDO_LABEL[envidoNext]}</button>}
+                    <button type="button" className="btn-fold" onClick={() => onRespondEnvido(false)}>Não quero</button>
+                    <button type="button" className="btn-call" onClick={() => onRespondEnvido(true)}>Quero</button>
+                    {canCallEnvido && envidoNext && <button type="button" className="btn-raise" onClick={onCallEnvido}>{ENVIDO_LABEL[envidoNext]}</button>}
                   </div>
                 </>
               )}
@@ -247,17 +247,17 @@ export function GauchoTable({
                 <>
                   <span className="hint">Flor chamada! Você aceita?</span>
                   <div className="truco-respond-row">
-                    <button className="btn-fold" onClick={() => onRespondFlor(false)}>Não quero</button>
-                    <button className="btn-call" onClick={() => onRespondFlor(true)}>Quero</button>
-                    {canCallFlor && florNext && <button className="btn-raise" onClick={onCallFlor}>{FLOR_LABEL[florNext]}</button>}
+                    <button type="button" className="btn-fold" onClick={() => onRespondFlor(false)}>Não quero</button>
+                    <button type="button" className="btn-call" onClick={() => onRespondFlor(true)}>Quero</button>
+                    {canCallFlor && florNext && <button type="button" className="btn-raise" onClick={onCallFlor}>{FLOR_LABEL[florNext]}</button>}
                   </div>
                 </>
               )}
               {!anyResponsePending && (canCallTruco || canCallEnvido || canCallFlor) && (
                 <div className="truco-respond-row">
-                  {canCallTruco && trucoNext && <button className="btn-raise" onClick={onCallTruco}>{TRUCO_LABEL[trucoNext]}</button>}
-                  {canCallEnvido && envidoNext && <button className="btn-raise" onClick={onCallEnvido}>{ENVIDO_LABEL[envidoNext]}</button>}
-                  {canCallFlor && florNext && <button className="btn-raise" onClick={onCallFlor}>{FLOR_LABEL[florNext]}</button>}
+                  {canCallTruco && trucoNext && <button type="button" className="btn-raise" onClick={onCallTruco}>{TRUCO_LABEL[trucoNext]}</button>}
+                  {canCallEnvido && envidoNext && <button type="button" className="btn-raise" onClick={onCallEnvido}>{ENVIDO_LABEL[envidoNext]}</button>}
+                  {canCallFlor && florNext && <button type="button" className="btn-raise" onClick={onCallFlor}>{FLOR_LABEL[florNext]}</button>}
                 </div>
               )}
             </div>
@@ -287,8 +287,8 @@ export function GauchoTable({
               {maoDeOnzePrompt.teamCards.map((c, i) => <PlayingCard key={i} card={c} width={48} />)}
             </div>
             <div className="actions">
-              <button className="btn-cancel" onClick={() => onMaoDeOnzeDecision(false)}>Correr</button>
-              <button className="btn-confirm" onClick={() => onMaoDeOnzeDecision(true)}>Jogar</button>
+              <button type="button" className="btn-cancel" onClick={() => onMaoDeOnzeDecision(false)}>Correr</button>
+              <button type="button" className="btn-confirm" onClick={() => onMaoDeOnzeDecision(true)}>Jogar</button>
             </div>
           </div>
         </div>
@@ -309,8 +309,8 @@ export function GauchoTable({
             </div>
             {rematch && <p className="hint">Aguardando: {rematch.pending.length} jogador(es)...</p>}
             <div className="actions">
-              <button className="btn-cancel" onClick={() => onRematchVote(false)}>Sair</button>
-              <button className="btn-confirm" onClick={() => onRematchVote(true)}>Jogar novamente</button>
+              <button type="button" className="btn-cancel" onClick={() => onRematchVote(false)}>Sair</button>
+              <button type="button" className="btn-confirm" onClick={() => onRematchVote(true)}>Jogar novamente</button>
             </div>
           </div>
         </div>

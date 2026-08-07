@@ -235,7 +235,7 @@ describe('Envido', () => {
     ])
     expect(g.callEnvido('b')).toBe(true)
     expect(g.respondEnvido('a', true)).toBe(true)
-    expect(g.lastEnvidoResult!.winnerTeam).toBe(1) // leaderSeat 1 → team1
+    expect(g.lastEnvidoResult?.winnerTeam).toBe(1) // leaderSeat 1 → team1
   })
 
   test('raising past envido without ever accepting, then declining, floors at 1', () => {
@@ -265,7 +265,7 @@ describe('Envido', () => {
     expect(g.callEnvido('b')).toBe(true) // falta_envido
     expect(g.tableState.envido.pendingCall).toBe('falta_envido')
     expect(g.respondEnvido('a', true)).toBe(true)
-    expect(g.lastEnvidoResult!.points).toBe(4) // 12 - max(8,5)
+    expect(g.lastEnvidoResult?.points).toBe(4) // 12 - max(8,5)
   })
 
   test('closes for the hand once vaza 1 resolves without being called', () => {

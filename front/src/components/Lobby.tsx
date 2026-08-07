@@ -32,9 +32,9 @@ export function Lobby({ rooms, onCreateRoom, onJoinRoom }: Props) {
   const [blinds, setBlinds]         = useState<Blinds>({ ...DEFAULT_BLINDS })
 
   function setBlind(key: keyof Blinds, raw: string) {
-    const val = Math.max(1, parseInt(raw) || 1)
+    const val = Math.max(1, parseInt(raw, 10) || 1)
     setBlinds(prev => {
-      let next = { ...prev, [key]: val }
+      const next = { ...prev, [key]: val }
       // keep SB < BB
       if (key === 'bigBlind'   && next.smallBlind >= next.bigBlind) next.smallBlind = Math.max(1, Math.floor(next.bigBlind / 2))
       if (key === 'smallBlind' && next.smallBlind >= next.bigBlind) next.bigBlind   = next.smallBlind * 2
@@ -56,7 +56,7 @@ export function Lobby({ rooms, onCreateRoom, onJoinRoom }: Props) {
     <>
       <div className="rooms-header">
         <h2>Mesas disponíveis</h2>
-        <button className="btn-create" onClick={() => setShowCreate(true)}>+ Criar mesa</button>
+        <button type="button" className="btn-create" onClick={() => setShowCreate(true)}>+ Criar mesa</button>
       </div>
 
       <div className="room-list">
@@ -83,7 +83,7 @@ export function Lobby({ rooms, onCreateRoom, onJoinRoom }: Props) {
                   <span className="player-count">{room.playerCount}/{room.maxPlayers}</span>
                 </div>
               </div>
-              <button className="btn-join" onClick={() => onJoinRoom(room.id)} disabled={full}>
+              <button type="button" className="btn-join" onClick={() => onJoinRoom(room.id)} disabled={full}>
                 {full ? 'Cheia' : playing ? '▶ Entrar (em jogo)' : 'Entrar na Sala'}
               </button>
             </div>
@@ -145,8 +145,8 @@ export function Lobby({ rooms, onCreateRoom, onJoinRoom }: Props) {
             </div>
 
             <div className="actions">
-              <button className="btn-cancel" onClick={() => setShowCreate(false)}>Cancelar</button>
-              <button className="btn-confirm" onClick={handleCreate}>Criar mesa</button>
+              <button type="button" className="btn-cancel" onClick={() => setShowCreate(false)}>Cancelar</button>
+              <button type="button" className="btn-confirm" onClick={handleCreate}>Criar mesa</button>
             </div>
           </div>
         </div>

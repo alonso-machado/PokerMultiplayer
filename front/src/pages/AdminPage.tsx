@@ -16,7 +16,7 @@ const TournamentSchema = z.object({
   name: z.string().min(1, 'Nome obrigatório').max(40, 'Máximo 40 caracteres'),
   scheduledStart: z.string().refine(v => {
     const d = new Date(v)
-    return !isNaN(d.getTime()) && d.getTime() > Date.now()
+    return !Number.isNaN(d.getTime()) && d.getTime() > Date.now()
   }, 'Data deve ser no futuro'),
   smallBlind: z.coerce.number().int().min(1, 'Mínimo 1'),
   bigBlind: z.coerce.number().int().min(2, 'Mínimo 2'),
@@ -196,7 +196,7 @@ export function AdminPage() {
                 onChange={e => setLoginForm(p => ({ ...p, pass: e.target.value }))} />
             </Field>
             {loginMsg && <p className="admin-msg err">{loginMsg}</p>}
-            <button className="admin-btn primary" disabled={loading}>
+            <button type="submit" className="admin-btn primary" disabled={loading}>
               {loading ? 'Entrando…' : 'Entrar'}
             </button>
           </form>
@@ -210,7 +210,7 @@ export function AdminPage() {
       <div className="admin-card">
         <div className="admin-header">
           <h1 className="admin-title">♠ Admin — Poker</h1>
-          <button className="admin-btn ghost" onClick={handleLogout}>Sair</button>
+          <button type="button" className="admin-btn ghost" onClick={handleLogout}>Sair</button>
         </div>
 
         {/* Current tournament status */}
@@ -220,10 +220,10 @@ export function AdminPage() {
             <TournamentStatus t={tournament} />
             {tournament.status === 'registering' && (
               <div className="admin-actions">
-                <button className="admin-btn success" onClick={handleStart} disabled={loading}>
+                <button type="button" className="admin-btn success" onClick={handleStart} disabled={loading}>
                   ▶ Iniciar agora
                 </button>
-                <button className="admin-btn danger" onClick={handleDelete} disabled={loading}>
+                <button type="button" className="admin-btn danger" onClick={handleDelete} disabled={loading}>
                   🗑 Cancelar
                 </button>
               </div>
@@ -275,7 +275,7 @@ export function AdminPage() {
 
               {tMsg && <p className={`admin-msg ${tMsg.includes('criado') ? 'ok' : 'err'}`}>{tMsg}</p>}
 
-              <button className="admin-btn primary" disabled={loading}>
+              <button type="submit" className="admin-btn primary" disabled={loading}>
                 {loading ? 'Criando…' : 'Criar torneio'}
               </button>
             </form>

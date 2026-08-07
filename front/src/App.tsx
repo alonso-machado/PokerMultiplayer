@@ -31,8 +31,14 @@ type PokerTab = 'rooms' | 'tournament'
 const identity = getOrCreateIdentity()
 
 function App() {
+  // The admin check must short-circuit before any hooks run — kept in this
+  // outer, hook-free wrapper so AppInner can call its hooks unconditionally
+  // on every render (Rules of Hooks).
   if (window.location.pathname === '/admin') return <AdminPage />
+  return <AppInner />
+}
 
+function AppInner() {
   const posthog = usePostHog()
   const [myName, setMyNameState] = useState(identity.name)
   const [activeGame, setActiveGame] = useState<GameGroup>('poker')
@@ -207,7 +213,7 @@ function App() {
         else if (msg.type.startsWith('canastra_')) handleCanastraMessage(msg)
         break
     }
-  }, [])
+  }, [posthog?.capture, handleTrucoMessage, handleGauchoMessage, handleCanastraMessage])
 
   const { send } = useSocket(identity, handleMessage)
 
@@ -360,17 +366,17 @@ function App() {
       <NameRow name={myName} onSave={setMyName} />
 
       <div className="tabs game-tabs">
-        <button className={`tab${activeGame === 'poker' ? ' active' : ''}`} onClick={() => setActiveGame('poker')}>♠ Poker</button>
-        <button className={`tab${activeGame === 'truco' ? ' active' : ''}`} onClick={() => setActiveGame('truco')}>🂡 Truco</button>
-        <button className={`tab${activeGame === 'gaucho' ? ' active' : ''}`} onClick={() => setActiveGame('gaucho')}>🧉 Truco Gaúcho</button>
-        <button className={`tab${activeGame === 'canastra' ? ' active' : ''}`} onClick={() => setActiveGame('canastra')}>🎴 Canastra</button>
+        <button type="button" className={`tab${activeGame === 'poker' ? ' active' : ''}`} onClick={() => setActiveGame('poker')}>♠ Poker</button>
+        <button type="button" className={`tab${activeGame === 'truco' ? ' active' : ''}`} onClick={() => setActiveGame('truco')}>🂡 Truco</button>
+        <button type="button" className={`tab${activeGame === 'gaucho' ? ' active' : ''}`} onClick={() => setActiveGame('gaucho')}>🧉 Truco Gaúcho</button>
+        <button type="button" className={`tab${activeGame === 'canastra' ? ' active' : ''}`} onClick={() => setActiveGame('canastra')}>🎴 Canastra</button>
       </div>
 
       {activeGame === 'poker' && (
         <>
           <div className="tabs">
-            <button className={`tab${activePokerTab === 'rooms' ? ' active' : ''}`} onClick={() => setActivePokerTab('rooms')}>🃏 Mesas</button>
-            <button className={`tab${activePokerTab === 'tournament' ? ' active' : ''}`} onClick={() => setActivePokerTab('tournament')}>🏆 Torneio</button>
+            <button type="button" className={`tab${activePokerTab === 'rooms' ? ' active' : ''}`} onClick={() => setActivePokerTab('rooms')}>🃏 Mesas</button>
+            <button type="button" className={`tab${activePokerTab === 'tournament' ? ' active' : ''}`} onClick={() => setActivePokerTab('tournament')}>🏆 Torneio</button>
           </div>
           {activePokerTab === 'rooms' && (
             <Lobby
@@ -439,7 +445,7 @@ function NameRow({ name, onSave }: { name: string; onSave: (n: string) => void }
       <label>Seu nome:</label>
       <input value={edit} maxLength={24} onChange={e => setEdit(e.target.value)}
         onKeyDown={e => e.key === 'Enter' && save()} placeholder="Como quer ser chamado?" />
-      <button onClick={save}>{saved ? '✓ Salvo' : 'Salvar'}</button>
+      <button type="button" onClick={save}>{saved ? '✓ Salvo' : 'Salvar'}</button>
     </div>
   )
 }

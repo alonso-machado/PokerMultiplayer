@@ -146,7 +146,7 @@ export class GauchoRoom {
     const isFerro = this.game.isFerro()
     for (const rp of this.players) {
       const gp = this.game.players.find((p) => p.id === rp.id)
-      if (!gp || gp.status !== 'mao_de_onze_pending') continue
+      if (gp?.status !== 'mao_de_onze_pending') continue
       rp.send({ type: 'gaucho_mao_de_onze_prompt', teamCards: this.game.teamHand(rp.id), isFerro, timeoutSeconds: TURN_TIMEOUT_S })
     }
     this.turnDeadlineAt = Date.now() + TURN_TIMEOUT_S * 1000

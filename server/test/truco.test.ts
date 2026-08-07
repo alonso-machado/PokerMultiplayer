@@ -319,8 +319,8 @@ describe('mão de 11', () => {
     expect(g.tableState.phase).toBe('mao_de_onze_decision')
     expect(g.isFerro()).toBe(true)
 
-    const p0 = g.players.find((p) => p.teamIndex === 0)!.id
-    const p1 = g.players.find((p) => p.teamIndex === 1)!.id
+    const p0 = g.players.find((p) => p.teamIndex === 0)?.id
+    const p1 = g.players.find((p) => p.teamIndex === 1)?.id
     expect(g.maoDeOnzeDecision(p0, true)).toBe(true)
     expect(g.tableState.phase).toBe('mao_de_onze_decision') // still waiting on team1
     expect(g.maoDeOnzeDecision(p1, true)).toBe(true)

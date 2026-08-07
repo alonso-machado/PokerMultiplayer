@@ -52,13 +52,13 @@ function scoreHand(cards: Card[]): HandResult {
       ? { rank: 9, tiebreakers: [14], name: 'Royal Flush' }
       : { rank: 8, tiebreakers: [strHigh], name: 'Straight Flush' }
   }
-  if (counts[0]![0] === 4) return { rank: 7, tiebreakers: sortedCounts(counts), name: 'Four of a Kind' }
-  if (counts[0]![0] === 3 && counts[1]![0] === 2) return { rank: 6, tiebreakers: sortedCounts(counts), name: 'Full House' }
+  if (counts[0]?.[0] === 4) return { rank: 7, tiebreakers: sortedCounts(counts), name: 'Four of a Kind' }
+  if (counts[0]?.[0] === 3 && counts[1]?.[0] === 2) return { rank: 6, tiebreakers: sortedCounts(counts), name: 'Full House' }
   if (isFlush) return { rank: 5, tiebreakers: values, name: 'Flush' }
   if (isStraight) return { rank: 4, tiebreakers: [strHigh], name: 'Straight' }
-  if (counts[0]![0] === 3) return { rank: 3, tiebreakers: sortedCounts(counts), name: 'Three of a Kind' }
-  if (counts[0]![0] === 2 && counts[1]![0] === 2) return { rank: 2, tiebreakers: sortedCounts(counts), name: 'Two Pair' }
-  if (counts[0]![0] === 2) return { rank: 1, tiebreakers: sortedCounts(counts), name: 'Pair' }
+  if (counts[0]?.[0] === 3) return { rank: 3, tiebreakers: sortedCounts(counts), name: 'Three of a Kind' }
+  if (counts[0]?.[0] === 2 && counts[1]?.[0] === 2) return { rank: 2, tiebreakers: sortedCounts(counts), name: 'Two Pair' }
+  if (counts[0]?.[0] === 2) return { rank: 1, tiebreakers: sortedCounts(counts), name: 'Pair' }
   return { rank: 0, tiebreakers: values, name: 'High Card' }
 }
 

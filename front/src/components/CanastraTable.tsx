@@ -139,7 +139,7 @@ export function CanastraTable({
           <strong>{roomName}</strong>
           <span className="hint"> · {config.mode === '1x1' ? '1x1' : '2x2 (duplas)'} · Canastra / Buraco</span>
         </div>
-        <button className="btn-cancel-small" onClick={onLeave}>Sair da mesa</button>
+        <button type="button" className="btn-cancel-small" onClick={onLeave}>Sair da mesa</button>
       </div>
 
       {!isStarted && <div className="empty-rooms">Aguardando jogadores...</div>}
@@ -189,7 +189,7 @@ export function CanastraTable({
           <div className={`truco-my-area${canAct || canDraw ? ' active-turn' : ''}`}>
             <div className="truco-hand">
               {myCards.map((c) => (
-                <button
+                <button type="button"
                   key={c.id}
                   className={`truco-hand-card${selected.has(c.id) ? ' selected' : ''}`}
                   onClick={() => toggleCard(c.id)}
@@ -204,11 +204,11 @@ export function CanastraTable({
             </div>
 
             <div className="action-bar canastra-action-bar">
-              <button className="btn-call" disabled={!canDraw} onClick={onDrawStock}>Comprar monte</button>
-              <button className="btn-call" disabled={!canTakeAction} onClick={handleTakeDiscard}>Comprar lixo</button>
-              <button className="btn-raise" disabled={!canFormNew} onClick={handleLayMeld}>Formar jogo</button>
-              <button className="btn-raise" disabled={!canAppend} onClick={handleAddToMeld}>Acrescentar</button>
-              <button className="btn-fold" disabled={!canDiscardSelected} onClick={handleDiscard}>Descartar</button>
+              <button type="button" className="btn-call" disabled={!canDraw} onClick={onDrawStock}>Comprar monte</button>
+              <button type="button" className="btn-call" disabled={!canTakeAction} onClick={handleTakeDiscard}>Comprar lixo</button>
+              <button type="button" className="btn-raise" disabled={!canFormNew} onClick={handleLayMeld}>Formar jogo</button>
+              <button type="button" className="btn-raise" disabled={!canAppend} onClick={handleAddToMeld}>Acrescentar</button>
+              <button type="button" className="btn-fold" disabled={!canDiscardSelected} onClick={handleDiscard}>Descartar</button>
             </div>
             <span className="hint">
               {selectedMeldId
@@ -241,8 +241,8 @@ export function CanastraTable({
             </div>
             {rematch && <p className="hint">Aguardando: {rematch.pending.length} jogador(es)...</p>}
             <div className="actions">
-              <button className="btn-cancel" onClick={() => onRematchVote(false)}>Sair</button>
-              <button className="btn-confirm" onClick={() => onRematchVote(true)}>Jogar novamente</button>
+              <button type="button" className="btn-cancel" onClick={() => onRematchVote(false)}>Sair</button>
+              <button type="button" className="btn-confirm" onClick={() => onRematchVote(true)}>Jogar novamente</button>
             </div>
           </div>
         </div>

@@ -467,7 +467,7 @@ export class GauchoGame {
     if (this._florStatus !== 'available') return false
     if (this._awaitingResponseFromTeam !== null || this._envidoAwaitingResponseFromTeam !== null) return false
     const player = this.players.find((p) => p.id === playerId)
-    if (!player || !player.hasFlor) return false
+    if (!player?.hasFlor) return false
 
     if (this._florAwaitingResponseFromTeam !== null) {
       if (player.teamIndex !== this._florAwaitingResponseFromTeam) return false

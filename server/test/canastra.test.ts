@@ -272,7 +272,7 @@ describe('turn flow', () => {
     while (g.tableState.stockCount > 0) {
       const pid = g.currentPlayerId()!
       g.drawStock(pid)
-      g.discard(pid, g.hand(pid)[0]!.id)
+      g.discard(pid, g.hand(pid)[0]?.id)
     }
     expect(g.tableState.stockCount).toBe(0)
     const pid = g.currentPlayerId()!
@@ -293,7 +293,7 @@ describe('laying and adding to melds', () => {
     const before = g.hand(cur).length
     expect(g.layMeld(cur, ['x1', 'x2', 'x3'])).toBe(true)
     expect(g.hand(cur).length).toBe(before - 3)
-    const teamIdx = g.players.find((p) => p.id === cur)!.teamIndex
+    const teamIdx = g.players.find((p) => p.id === cur)?.teamIndex
     expect(g.tableState.teams[teamIdx].melds).toHaveLength(1)
   })
 
@@ -304,7 +304,7 @@ describe('laying and adding to melds', () => {
     g.drawStock(cur)
     setHand(g, cur, ['4', '5', '6'].map((r, i) => card(`s${i}`, 'hearts', r as Rank)))
     g.layMeld(cur, ['s0', 's1', 's2'])
-    const meld = g.tableState.teams[g.players.find((p) => p.id === cur)!.teamIndex].melds[0]!
+    const meld = g.tableState.teams[g.players.find((p) => p.id === cur)?.teamIndex].melds[0]!
     setHand(g, cur, ['7', '8', '9', '10'].map((r, i) => card(`t${i}`, 'hearts', r as Rank)))
     expect(g.addToMeld(cur, meld.id, ['t0', 't1', 't2', 't3'])).toBe(true)
     expect(meld.cards).toHaveLength(7)
@@ -331,7 +331,7 @@ describe('taking the discard pile', () => {
     const ok = g.takeDiscard(second, { kind: 'new', cardIds: ['h1', 'h2', 'd1'] })
     expect(ok).toBe(true)
     expect(g.tableState.turnStage).toBe('act')
-    const teamIdx = g.players.find((p) => p.id === second)!.teamIndex
+    const teamIdx = g.players.find((p) => p.id === second)?.teamIndex
     expect(g.tableState.teams[teamIdx].melds).toHaveLength(1)
   })
 
@@ -345,7 +345,7 @@ describe('taking the discard pile', () => {
     g.drawStock(first)
     setHand(g, first, [...g.hand(first), card('s0', 'hearts', '4'), card('s1', 'hearts', '5'), card('s2', 'hearts', '6')])
     g.layMeld(first, ['s0', 's1', 's2'])
-    const meld = g.tableState.teams[g.players.find((p) => p.id === first)!.teamIndex].melds[0]!
+    const meld = g.tableState.teams[g.players.find((p) => p.id === first)?.teamIndex].melds[0]!
     const junk = card('junk', 'clubs', '9')
     setHand(g, first, [...g.hand(first), junk])
     g.discard(first, junk.id)
@@ -381,7 +381,7 @@ describe('batida (going out)', () => {
     setHand(g, cur, ['4', '5', '6'].map((r, i) => card(`s${i}`, 'hearts', r as Rank)))
     expect(g.layMeld(cur, ['s0', 's1', 's2'])).toBe(true)
     expect(g.hand(cur).length).toBe(11) // emptied, then got the 11-card morto
-    const teamIdx = g.players.find((p) => p.id === cur)!.teamIndex
+    const teamIdx = g.players.find((p) => p.id === cur)?.teamIndex
     expect(g.tableState.teams[teamIdx].mortoTaken).toBe(true)
     expect(g.tableState.phase).toBe('playing') // round didn't end
   })
@@ -390,7 +390,7 @@ describe('batida (going out)', () => {
     const g = makeGame('1x1')
     g.startHand()
     const cur = g.currentPlayerId()!
-    const teamIdx = g.players.find((p) => p.id === cur)!.teamIndex
+    const teamIdx = g.players.find((p) => p.id === cur)?.teamIndex
     // Force the morto as already taken via a first (harmless) direct batida.
     g.drawStock(cur)
     setHand(g, cur, ['4', '5', '6'].map((r, i) => card(`s${i}`, 'hearts', r as Rank)))
@@ -419,7 +419,7 @@ describe('batida (going out)', () => {
     while (g.currentPlayerId() !== 'd') {
       const pid = g.currentPlayerId()!
       g.drawStock(pid)
-      g.discard(pid, g.hand(pid)[0]!.id)
+      g.discard(pid, g.hand(pid)[0]?.id)
     }
     expect(g.hand('d').length).toBe(11 + 11) // own hand + the delayed morto
     expect(g.tableState.teams[1].mortoTaken).toBe(true)
@@ -431,10 +431,10 @@ describe('scoring and match wins', () => {
     const g = makeGame('1x1')
     g.startHand()
     g.recordMatchWin(0)
-    expect(g.players.find((p) => p.id === 'a')!.matchWins).toBe(1)
-    expect(g.players.find((p) => p.id === 'b')!.matchWins).toBe(0)
+    expect(g.players.find((p) => p.id === 'a')?.matchWins).toBe(1)
+    expect(g.players.find((p) => p.id === 'b')?.matchWins).toBe(0)
     g.recordMatchWin(null)
-    expect(g.players.find((p) => p.id === 'a')!.matchWins).toBe(1) // unchanged on a tie
+    expect(g.players.find((p) => p.id === 'a')?.matchWins).toBe(1) // unchanged on a tie
   })
 
   test('round end scores meld points, hand penalty and morto penalty correctly (no canastra -> no batida bonus)', () => {
@@ -442,8 +442,8 @@ describe('scoring and match wins', () => {
     g.startHand()
     const cur = g.currentPlayerId()!
     const other = cur === 'a' ? 'b' : 'a'
-    const curTeam = g.players.find((p) => p.id === cur)!.teamIndex
-    const otherTeam = g.players.find((p) => p.id === other)!.teamIndex
+    const curTeam = g.players.find((p) => p.id === cur)?.teamIndex
+    const otherTeam = g.players.find((p) => p.id === other)?.teamIndex
 
     // Opponent never acts — leave them with 1 known card (Ace, worth 15) and
     // no morto pickup, for a predictable penalty.
@@ -472,7 +472,7 @@ describe('scoring and match wins', () => {
     g.startHand()
     const cur = g.currentPlayerId()!
     const other = cur === 'a' ? 'b' : 'a'
-    const curTeam = g.players.find((p) => p.id === cur)!.teamIndex
+    const curTeam = g.players.find((p) => p.id === cur)?.teamIndex
 
     setHand(g, other, [])
 
@@ -485,6 +485,6 @@ describe('scoring and match wins', () => {
     expect(g.layMeld(cur, canastraCards.map((c) => c.id))).toBe(true)
 
     expect(g.tableState.phase).toBe('round_end')
-    expect(g.lastRoundResult!.breakdown[curTeam].battingBonus).toBe(100)
+    expect(g.lastRoundResult?.breakdown[curTeam].battingBonus).toBe(100)
   })
 })

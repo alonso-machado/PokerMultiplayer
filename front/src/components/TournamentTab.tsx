@@ -34,7 +34,7 @@ export function TournamentTab({ tournament, myToken, ranking, eliminated, winner
         <div className="elim-banner">
           <span className="elim-rank">Você ficou em {eliminated.rank}º de {eliminated.total}</span>
           {winnerName && <span className="elim-winner">🏆 Vencedor: {winnerName}</span>}
-          <button className="btn-dismiss" onClick={onDismissElimination}>OK</button>
+          <button type="button" className="btn-dismiss" onClick={onDismissElimination}>OK</button>
         </div>
       )}
 
@@ -76,12 +76,12 @@ export function TournamentTab({ tournament, myToken, ranking, eliminated, winner
         {isRegistered && tournament.status === 'registering' && (
           <div className="registered-info">
             <span className="registered-check">✓ Você está inscrito</span>
-            <button className="btn-unregister" onClick={onUnregister}>Cancelar inscrição</button>
+            <button type="button" className="btn-unregister" onClick={onUnregister}>Cancelar inscrição</button>
           </div>
         )}
 
         {canRegister && (
-          <button className="btn-register" onClick={onRegister}>
+          <button type="button" className="btn-register" onClick={onRegister}>
             Inscrever-se no torneio
           </button>
         )}

@@ -102,7 +102,7 @@ const handleAdmin = adminRouter(
       return { ok: false, error: 'Já existe um torneio ativo.' }
     try {
       const scheduledStart = new Date(data.scheduledStart)
-      if (isNaN(scheduledStart.getTime())) return { ok: false, error: 'Data inválida.' }
+      if (Number.isNaN(scheduledStart.getTime())) return { ok: false, error: 'Data inválida.' }
       const cfg: RoomConfig = {
         smallBlind: Math.max(1, data.config.smallBlind | 0),
         bigBlind:   Math.max(2, data.config.bigBlind | 0),
@@ -645,7 +645,7 @@ const server = Bun.serve<Session>({
         }
 
         case 'unregister_tournament': {
-          if (!activeTournament || activeTournament.status !== 'registering') break
+          if (activeTournament?.status !== 'registering') break
           activeTournament.unregister(session.playerId)
           session.tournamentToken = null
           setPersistentToken(session.playerId, null)

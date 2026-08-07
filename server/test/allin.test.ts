@@ -303,13 +303,13 @@ describe('All-in rules — pot integrity', () => {
     g.applyAction('bob', 'all-in')
 
     expect(g.tableState.pot).toBe(potBefore + chipsBefore)
-    expect(g.players.find(p => p.id === 'bob')!.chips).toBe(0)
+    expect(g.players.find(p => p.id === 'bob')?.chips).toBe(0)
   })
 
   test('all-in player status becomes all-in', () => {
     const g = makeAtFlop()
     g.applyAction('bob', 'all-in')
-    expect(g.players.find(p => p.id === 'bob')!.status).toBe('all-in')
+    expect(g.players.find(p => p.id === 'bob')?.status).toBe('all-in')
   })
 
   test('all-in player cannot act again', () => {

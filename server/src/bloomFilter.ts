@@ -100,7 +100,7 @@ class UsernameFilter {
       ? Math.round(-(this.m / this.k) * Math.log(1 - fillRatio))
       : Infinity as unknown as number
     // FPR ≈ fill^k
-    const falsePositiveRate = Math.pow(fillRatio, this.k)
+    const falsePositiveRate = fillRatio ** this.k
 
     return {
       epoch: EPOCH,

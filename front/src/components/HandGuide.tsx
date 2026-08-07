@@ -122,7 +122,7 @@ export function HandGuide() {
 
   return (
     <>
-      <button
+      <button type="button"
         className={`hand-guide-toggle${open ? ' active' : ''}`}
         onClick={() => setOpen(v => !v)}
         title="Guia de mãos do poker"
