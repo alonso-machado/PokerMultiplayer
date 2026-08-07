@@ -10,10 +10,79 @@
 # `overrides` used to clear previously-found vulnerabilities.
 set -uo pipefail
 
+# ── Locate bun without relying on PATH ──────────────────────────────────────
+# GUI git clients (GitHub Desktop, etc.) launch as a desktop app, not from a
+# shell — they can run hooks with a PATH/HOME/USERPROFILE that doesn't match
+# your terminal's, no matter how the launching account is set up. Rather than
+# depend on any single one of those, try several independent ways to find
+# bun's absolute path and invoke that directly.
+find_bun() {
+  if command -v bun >/dev/null 2>&1; then command -v bun; return 0; fi
+
+  # GitHub Desktop on Windows runs hooks through WSL, not Git Bash/MSYS —
+  # the Windows drive shows up at /mnt/c/ there instead of /c/, and its
+  # `.bun/bin` directory can be genuinely present on $PATH without
+  # `command -v bun` matching it (WSL's interop layer executes `bun.exe`
+  # for a bare `bun`, but `command -v` doesn't resolve the bare name to the
+  # .exe file the way it would on native Windows). So scan $PATH by hand too.
+  local dir
+  while IFS= read -r dir; do
+    [ -n "$dir" ] || continue
+    [ -x "$dir/bun.exe" ] && { echo "$dir/bun.exe"; return 0; }
+    [ -x "$dir/bun" ] && { echo "$dir/bun"; return 0; }
+  done < <(printf '%s' "$PATH" | tr ':' '\n')
+
+  local base exe
+  for base in "${HOME:-}" "${USERPROFILE:-}"; do
+    [ -n "$base" ] || continue
+    for exe in "$base/.bun/bin/bun.exe" "$base/.bun/bin/bun"; do
+      [ -x "$exe" ] && { echo "$exe"; return 0; }
+    done
+  done
+
+  # Derive the Windows account name from the OS itself. Under WSL, `whoami`
+  # reports the *Linux* user (e.g. "user"), not the Windows account, so this
+  # only helps outside WSL — kept as a middle fallback, not the only one.
+  local user
+  user=$(whoami 2>/dev/null | sed 's/^.*\\//' 2>/dev/null)
+  if [ -n "$user" ]; then
+    for exe in "/c/Users/$user/.bun/bin/bun.exe" "/c/Users/$user/.bun/bin/bun" \
+               "/mnt/c/Users/$user/.bun/bin/bun.exe" "/mnt/c/Users/$user/.bun/bin/bun"; do
+      [ -x "$exe" ] && { echo "$exe"; return 0; }
+    done
+  fi
+
+  # Last resort: a pure filesystem glob across every profile on the machine,
+  # under both possible Windows-drive mount conventions (/c/ for Git
+  # Bash/MSYS, /mnt/c/ for WSL) — no environment variable or external
+  # command involved. Picks the only match on a typical single-developer
+  # machine.
+  local exe2
+  for exe2 in /c/Users/*/.bun/bin/bun.exe /c/Users/*/.bun/bin/bun \
+              /mnt/c/Users/*/.bun/bin/bun.exe /mnt/c/Users/*/.bun/bin/bun; do
+    [ -x "$exe2" ] && { echo "$exe2"; return 0; }
+  done
+
+  return 1
+}
+
+BUN="$(find_bun)" || {
+  echo "❌ 'bun' not found by any method (PATH scan, \$HOME, \$USERPROFILE,"
+  echo "   whoami, or scanning /c/ and /mnt/c/ Users/*/.bun/bin). Diagnostics"
+  echo "   for this run:"
+  echo "     HOME=${HOME:-<unset>}"
+  echo "     USERPROFILE=${USERPROFILE:-<unset>}"
+  echo "     whoami=$(whoami 2>&1)"
+  echo "     PATH=${PATH:-<unset>}"
+  echo "   If bun lives somewhere else on this machine, add that path inside"
+  echo "   find_bun() in .githooks/pre-commit."
+  exit 1
+}
+
 fail=0
 
 echo "🔍 biome check ."
-if ! bun x biome check . --max-diagnostics=2000; then
+if ! "$BUN" x biome check . --max-diagnostics=2000; then
   echo "❌ Biome found errors — fix them above before committing."
   fail=1
 fi
@@ -21,10 +90,10 @@ fi
 for dir in . server front; do
   echo ""
   echo "🔍 bun audit ($dir)"
-  (cd "$dir" && bun audit)
+  (cd "$dir" && "$BUN" audit)
   audit_exit=$?
   if [ $audit_exit -ne 0 ]; then
-    if ! (cd "$dir" && bun audit --audit-level=high >/dev/null 2>&1); then
+    if ! (cd "$dir" && "$BUN" audit --audit-level=high >/dev/null 2>&1); then
       echo "❌ $dir: high/critical vulnerabilities found — see above (moderate/low are warnings only)."
       fail=1
     else
