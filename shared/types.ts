@@ -134,6 +134,8 @@ export type ClientMessage =
   | GauchoClientMessage
   // Canastra / Buraco (see below)
   | CanastraClientMessage
+  // Blackjack / 21 (see below)
+  | BlackjackClientMessage
 
 // ─── WebSocket: Server → Client ───────────────────────────────────────────────
 
@@ -192,6 +194,8 @@ export type ServerMessage =
   | GauchoServerMessage
   // ── Canastra / Buraco (see below) ─────────────────────────────────────────
   | CanastraServerMessage
+  // ── Blackjack / 21 (see below) ────────────────────────────────────────────
+  | BlackjackServerMessage
 
 export interface ShowdownResult {
   playerId: string
@@ -591,3 +595,100 @@ export type CanastraServerMessage =
     }
   /** Broadcast — rematch vote progress */
   | { type: 'canastra_rematch_status'; accepted: string[]; pending: string[] }
+
+// ─── Blackjack / 21 ─────────────────────────────────────────────────────────
+// See .claude/Blackjack.md for the full rules this section's types model.
+// Rules source: https://bicyclecards.com/how-to-play/blackjack — the only
+// ruleset used for this game (deliberately: many house variants exist online).
+// Structurally different from every other game here: players don't play
+// against each other, they each play their own hand against a shared dealer
+// hand, and all cards are public except the dealer's hole card while it's
+// hidden — no private per-player "yourCards" messages are needed. There's
+// also no room creation: see BlackjackClientMessage below, matchmaking
+// replaces it entirely (single "join", server assigns a table).
+
+export const BLACKJACK_MAX_PLAYERS = 7
+export const BLACKJACK_STARTING_CHIPS = 100
+
+export type BlackjackPlayerStatus = 'waiting' | 'active' | 'disconnected'
+export type BlackjackOutcome = 'blackjack' | 'win' | 'push' | 'lose'
+
+export interface BlackjackHand {
+  cards: Card[]
+  bet: number
+  isDoubled: boolean
+  isSplitAces: boolean   // one of the two hands created by splitting aces — one card only, stands automatically
+  isBusted: boolean
+  isBlackjack: boolean   // natural 21 — exactly the original 2-card deal, never true after a split
+  isStood: boolean
+  outcome: BlackjackOutcome | null   // set only once tableState.phase === 'round_end'
+  payout: number                     // total chips returned (bet + winnings) at round end; 0 on a loss/bust
+}
+
+export interface BlackjackPlayer {
+  id: string
+  name: string
+  seatIndex: number
+  chips: number
+  status: BlackjackPlayerStatus
+  hands: BlackjackHand[]   // empty outside a round; 1 normally, 2 after a split
+  insuranceBet: number     // 0 if none taken this round
+}
+
+export interface BlackjackDealerHand {
+  cards: Card[]        // length 1 while holeHidden — the hidden card is never sent to clients
+  holeHidden: boolean
+  isBusted: boolean
+  isBlackjack: boolean
+}
+
+export type BlackjackPhase =
+  | 'waiting'        // no players seated yet
+  | 'betting'        // simultaneous betting window, all seated players
+  | 'insurance'      // dealer shows an Ace — simultaneous insurance window
+  | 'player_turns'   // sequential per-seat hit/stand/double/split
+  | 'dealer_turn'    // dealer reveals hole card and auto-plays
+  | 'round_end'      // outcomes/payouts settled, shown briefly before the next betting window
+
+export interface BlackjackTableState {
+  phase: BlackjackPhase
+  dealer: BlackjackDealerHand
+  currentSeat: number | null        // whose turn during player_turns
+  currentHandIndex: number | null   // which of that seat's hands (0 or 1) is active
+}
+
+// ─── WebSocket: Client → Server (Blackjack) ────────────────────────────────
+
+export type BlackjackClientMessage =
+  | { type: 'blackjack_join' }   // no roomId/config — server matchmakes into any table with a free seat, or creates one
+  | { type: 'blackjack_leave_room' }
+  | { type: 'blackjack_place_bet'; amount: number }
+  | { type: 'blackjack_insurance_bet'; amount: number }   // 0 = decline
+  | { type: 'blackjack_hit' }
+  | { type: 'blackjack_stand' }
+  | { type: 'blackjack_double' }
+  | { type: 'blackjack_split' }
+
+// ─── WebSocket: Server → Client (Blackjack) ────────────────────────────────
+
+export type BlackjackServerMessage =
+  | { type: 'blackjack_room_joined'; roomId: string; yourId: string }
+  | { type: 'blackjack_room_left'; reason?: 'manual' | 'expired' | 'busted' }
+  | { type: 'blackjack_room_error'; message: string }
+  | { type: 'blackjack_player_list'; players: BlackjackPlayer[] }
+  | { type: 'blackjack_game_started' }
+  /** Broadcast — new simultaneous betting window opens; one shared countdown for everyone, not per-seat. */
+  | { type: 'blackjack_betting_open'; players: BlackjackPlayer[]; tableState: BlackjackTableState; timeoutSeconds: number }
+  /** Broadcast — dealer shows an Ace; simultaneous insurance window. Each
+   *  player's own cap is floor(their hand's bet / 2) — derived client-side
+   *  from `players`, not sent as a single number (bets differ per player). */
+  | { type: 'blackjack_insurance_open'; timeoutSeconds: number; players: BlackjackPlayer[]; tableState: BlackjackTableState }
+  /** Private — sent to the seat whose turn it is during player_turns. */
+  | { type: 'blackjack_your_turn'; handIndex: number; validActions: ('hit' | 'stand' | 'double' | 'split')[]; timeoutSeconds: number }
+  /** Broadcast — generic re-render after any bet/insurance/hit/stand/double/split/dealer card. */
+  | { type: 'blackjack_state_update'; players: BlackjackPlayer[]; tableState: BlackjackTableState }
+  /** Broadcast — round settled: every hand's outcome/payout and the dealer's final hand. */
+  | { type: 'blackjack_round_end'; players: BlackjackPlayer[]; dealer: BlackjackDealerHand; tableState: BlackjackTableState }
+  /** Broadcast (lobby-wide, not per-table) — how many tables/players exist right
+   *  now, so the lobby can show activity without a full room list to browse. */
+  | { type: 'blackjack_lobby_stats'; tableCount: number; playerCount: number }

@@ -9,6 +9,7 @@ import { useSocket } from './hooks/useSocket'
 import { useTrucoGame } from './hooks/useTrucoGame'
 import { useGauchoGame } from './hooks/useGauchoGame'
 import { useCanastraGame } from './hooks/useCanastraGame'
+import { useBlackjackGame } from './hooks/useBlackjackGame'
 import { getOrCreateIdentity, saveName, saveIdentityToken, saveTournamentToken, clearTournamentToken } from './hooks/usePlayerToken'
 import { Lobby } from './components/Lobby'
 import { TournamentTab } from './components/TournamentTab'
@@ -19,13 +20,15 @@ import { GauchoLobby } from './components/GauchoLobby'
 import { GauchoTable } from './components/GauchoTable'
 import { CanastraLobby } from './components/CanastraLobby'
 import { CanastraTable } from './components/CanastraTable'
+import { BlackjackLobby } from './components/BlackjackLobby'
+import { BlackjackTable } from './components/BlackjackTable'
 import { HandGuide } from './components/HandGuide'
 import { AdminPage } from './pages/AdminPage'
 import type { TrucoRoomSummary, GauchoRoomSummary, CanastraRoomSummary } from '../../shared/types'
 
 interface TurnState { validActions: PlayerAction[]; callAmount: number; minRaise: number }
 interface ShowdownEntry { playerId: string; playerName: string; cards: Card[]; bestCards: Card[]; handName: string; won: number }
-type GameGroup = 'poker' | 'truco' | 'gaucho' | 'canastra'
+type GameGroup = 'poker' | 'truco' | 'gaucho' | 'canastra' | 'blackjack'
 type PokerTab = 'rooms' | 'tournament'
 
 const identity = getOrCreateIdentity()
@@ -50,6 +53,8 @@ function AppInner() {
   const { gauchoState, handleGauchoMessage } = useGauchoGame(identity.playerId)
   const [canastraRooms, setCanastraRooms] = useState<CanastraRoomSummary[]>([])
   const { canastraState, handleCanastraMessage } = useCanastraGame(identity.playerId)
+  const { blackjackState, handleBlackjackMessage } = useBlackjackGame(identity.playerId)
+  const [blackjackStats, setBlackjackStats] = useState({ tableCount: 0, playerCount: 0 })
 
   // Tournament
   const [tournamentInfo,       setTournamentInfo]       = useState<TournamentInfo | null>(null)
@@ -90,6 +95,7 @@ function AppInner() {
       case 'truco_room_list': setTrucoRooms(msg.rooms); break
       case 'gaucho_room_list': setGauchoRooms(msg.rooms); break
       case 'canastra_room_list': setCanastraRooms(msg.rooms); break
+      case 'blackjack_lobby_stats': setBlackjackStats({ tableCount: msg.tableCount, playerCount: msg.playerCount }); break
       case 'tournament_info':
         // A brand-new tournament (different id) means our previous registration
         // token is stale — let the player register again for this one.
@@ -211,9 +217,10 @@ function AppInner() {
         if (msg.type.startsWith('truco_')) handleTrucoMessage(msg)
         else if (msg.type.startsWith('gaucho_')) handleGauchoMessage(msg)
         else if (msg.type.startsWith('canastra_')) handleCanastraMessage(msg)
+        else if (msg.type.startsWith('blackjack_')) handleBlackjackMessage(msg)
         break
     }
-  }, [posthog?.capture, handleTrucoMessage, handleGauchoMessage, handleCanastraMessage])
+  }, [posthog?.capture, handleTrucoMessage, handleGauchoMessage, handleCanastraMessage, handleBlackjackMessage])
 
   const { send } = useSocket(identity, handleMessage)
 
@@ -234,6 +241,27 @@ function AppInner() {
   }
 
   // ── Routing ───────────────────────────────────────────────────────────────
+
+  if (blackjackState.roomId) {
+    return (
+      <BlackjackTable
+        myId={blackjackState.myId}
+        players={blackjackState.players}
+        tableState={blackjackState.tableState}
+        isStarted={blackjackState.isStarted}
+        turn={blackjackState.turn}
+        turnDeadline={blackjackState.turnDeadline}
+        error={blackjackState.error}
+        onLeave={() => send({ type: 'blackjack_leave_room' })}
+        onPlaceBet={(amount) => send({ type: 'blackjack_place_bet', amount })}
+        onInsuranceBet={(amount) => send({ type: 'blackjack_insurance_bet', amount })}
+        onHit={() => send({ type: 'blackjack_hit' })}
+        onStand={() => send({ type: 'blackjack_stand' })}
+        onDouble={() => send({ type: 'blackjack_double' })}
+        onSplit={() => send({ type: 'blackjack_split' })}
+      />
+    )
+  }
 
   if (canastraState.roomId && canastraState.config) {
     return (
@@ -355,13 +383,15 @@ function AppInner() {
         {activeGame === 'poker' ? "♠ Texas Hold'em ♥"
           : activeGame === 'truco' ? '🂡 Truco'
           : activeGame === 'gaucho' ? '🧉 Truco Gaúcho'
-          : '🎴 Canastra / Buraco'}
+          : activeGame === 'canastra' ? '🎴 Canastra / Buraco'
+          : '🂡 Blackjack / 21'}
       </h1>
       <p className="subtitle">
         {activeGame === 'poker' ? 'Poker multiplayer em tempo real'
           : activeGame === 'truco' ? 'Truco multiplayer — Paulista ou Mineiro'
           : activeGame === 'gaucho' ? 'Truco Gaúcho / Espanhol — com Envido e Flor'
-          : 'Canastra / Buraco multiplayer — 1x1 ou 2x2'}
+          : activeGame === 'canastra' ? 'Canastra / Buraco multiplayer — 1x1 ou 2x2'
+          : 'Blackjack / 21 — você contra o dealer, até 7 na mesa'}
       </p>
       <NameRow name={myName} onSave={setMyName} />
 
@@ -370,6 +400,7 @@ function AppInner() {
         <button type="button" className={`tab${activeGame === 'truco' ? ' active' : ''}`} onClick={() => setActiveGame('truco')}>🂡 Truco</button>
         <button type="button" className={`tab${activeGame === 'gaucho' ? ' active' : ''}`} onClick={() => setActiveGame('gaucho')}>🧉 Truco Gaúcho</button>
         <button type="button" className={`tab${activeGame === 'canastra' ? ' active' : ''}`} onClick={() => setActiveGame('canastra')}>🎴 Canastra</button>
+        <button type="button" className={`tab${activeGame === 'blackjack' ? ' active' : ''}`} onClick={() => setActiveGame('blackjack')}>🂡 Blackjack / 21</button>
       </div>
 
       {activeGame === 'poker' && (
@@ -426,6 +457,10 @@ function AppInner() {
           onCreateRoom={(name, cfg) => send({ type: 'canastra_create_room', roomName: name, config: cfg })}
           onJoinRoom={(id) => send({ type: 'canastra_join_room', roomId: id })}
         />
+      )}
+
+      {activeGame === 'blackjack' && (
+        <BlackjackLobby stats={blackjackStats} onJoin={() => send({ type: 'blackjack_join' })} />
       )}
     </div>
     <HandGuide />

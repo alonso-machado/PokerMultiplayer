@@ -780,3 +780,21 @@ input:focus { border-color: var(--gold); }
 .rebuy-actions { display: flex; flex-direction: column; gap: 0.6rem; }
 .btn-rebuy-yes { background: var(--green); color: var(--text); font-size: 0.95rem; padding: 0.65rem; }
 .btn-rebuy-no  { background: #3a1a1a; color: #e07070; font-size: 0.85rem; padding: 0.55rem; }
+
+/* ── Blackjack / 21 (reuses the .truco-table/.action-bar shell) ──────────── */
+.bj-dealer-area { display: flex; flex-direction: column; align-items: center; gap: 0.3rem; }
+.bj-hand-cards { display: flex; gap: 0.25rem; justify-content: center; flex-wrap: wrap; }
+.bj-seats { align-items: flex-start; }
+.bj-seat { flex-direction: column; align-items: center; border-radius: 12px; padding: 0.5rem 0.7rem; }
+.bj-seat-hands { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center; }
+.bj-my-hands { margin-bottom: 0.2rem; }
+.bj-hand { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; border-radius: 8px; padding: 0.25rem; border: 2px solid transparent; }
+.bj-hand.active-turn { border-color: var(--gold); box-shadow: 0 0 10px rgba(201,168,76,0.45); }
+.bj-hand-meta { display: flex; flex-direction: column; align-items: center; gap: 0.1rem; }
+.bj-badge { font-size: 0.68rem; font-weight: 700; padding: 0.1rem 0.4rem; border-radius: 6px; }
+.bj-badge-win  { background: rgba(46,204,113,0.15); color: #2ecc71; }
+.bj-badge-lose { background: rgba(192,57,43,0.18); color: #e07070; }
+.bj-bet-bar { flex-direction: row; flex-wrap: wrap; justify-content: center; align-items: center; }
+.bj-bet-bar input { width: 90px; padding: 0.4rem 0.5rem; border-radius: 6px; border: 1px solid var(--border); background: #0d1f14; color: var(--text); font-size: 0.9rem; }
+.bj-error { color: #e07070; }
+.bj-lobby-stats { color: var(--gold-light); font-weight: 600; margin-bottom: 0.6rem; }

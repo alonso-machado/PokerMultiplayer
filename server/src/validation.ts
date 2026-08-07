@@ -1,4 +1,5 @@
 import type { Card, CanastraMeldPlan, CanastraRoomConfig, ClientMessage, GauchoRoomConfig, PlayerAction, Rank, RoomConfig, Suit, TrucoRoomConfig } from '../../shared/types'
+// Blackjack has no room config to validate — see blackjack_join below.
 
 const MAX_PAYLOAD_BYTES = 512
 const MAX_MELD_CARDS    = 20
@@ -269,6 +270,27 @@ export function parseClientMessage(raw: unknown): ClientMessage | null {
     case 'canastra_rematch_vote':
       if (!isBool(m.accept)) return null
       return { type: 'canastra_rematch_vote', accept: m.accept }
+
+    // ── Blackjack / 21 ───────────────────────────────────────────────────
+    // No create/list/join-by-id — the server matchmakes on 'blackjack_join'.
+    case 'blackjack_join':       return { type: 'blackjack_join' }
+    case 'blackjack_leave_room': return { type: 'blackjack_leave_room' }
+    case 'blackjack_hit':        return { type: 'blackjack_hit' }
+    case 'blackjack_stand':      return { type: 'blackjack_stand' }
+    case 'blackjack_double':     return { type: 'blackjack_double' }
+    case 'blackjack_split':      return { type: 'blackjack_split' }
+
+    case 'blackjack_place_bet': {
+      const amount = safeInt(m.amount, 1, 1_000_000)
+      if (amount === null) return null
+      return { type: 'blackjack_place_bet', amount }
+    }
+
+    case 'blackjack_insurance_bet': {
+      const amount = safeInt(m.amount, 0, 1_000_000)
+      if (amount === null) return null
+      return { type: 'blackjack_insurance_bet', amount }
+    }
 
     default:
       return null

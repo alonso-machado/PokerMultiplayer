@@ -14,6 +14,7 @@ import { Room } from './room'
 import { TrucoRoom } from './trucoRoom'
 import { GauchoRoom } from './gauchoRoom'
 import { CanastraRoom } from './canastraRoom'
+import { BlackjackRoom } from './blackjackRoom'
 import { Tournament } from './tournament'
 import { adminRouter, publicTournamentHandler } from './admin'
 
@@ -23,6 +24,7 @@ const rooms = new Map<string, Room>()
 const trucoRooms = new Map<string, TrucoRoom>()
 const gauchoRooms = new Map<string, GauchoRoom>()
 const canastraRooms = new Map<string, CanastraRoom>()
+const blackjackRooms = new Map<string, BlackjackRoom>()
 let activeTournament: Tournament | null = null
 
 // ── Persistent player sessions (survive WS reconnect) ─────────────────────────
@@ -33,6 +35,7 @@ interface PersistentSession {
   trucoRoomId: string | null
   gauchoRoomId: string | null
   canastraRoomId: string | null
+  blackjackRoomId: string | null
   tournamentToken: string | null
 }
 const playerSessions = new Map<string, PersistentSession>()
@@ -45,6 +48,7 @@ interface Session {
   trucoRoomId: string | null
   gauchoRoomId: string | null
   canastraRoomId: string | null
+  blackjackRoomId: string | null
   tournamentToken: string | null
 }
 
@@ -90,6 +94,22 @@ function currentGauchoRoom(session: Session): GauchoRoom | undefined {
 
 function currentCanastraRoom(session: Session): CanastraRoom | undefined {
   return session.canastraRoomId ? canastraRooms.get(session.canastraRoomId) : undefined
+}
+
+function currentBlackjackRoom(session: Session): BlackjackRoom | undefined {
+  return session.blackjackRoomId ? blackjackRooms.get(session.blackjackRoomId) : undefined
+}
+
+/** Matchmaking — Blackjack has no room creation/browsing (see .claude/Blackjack.md):
+ *  join whichever table has a free seat, or open a new one, capped at 7 per dealer. */
+function findOrCreateBlackjackRoom(): BlackjackRoom {
+  for (const r of blackjackRooms.values()) if (!r.isFull) return r
+  const room = new BlackjackRoom(generateId(), 'Mesa de Blackjack', {
+    onEmpty: () => { blackjackRooms.delete(room.id); broadcastBlackjackLobbyStats() },
+    onPlayersChanged: () => broadcastBlackjackLobbyStats(),
+  })
+  blackjackRooms.set(room.id, room)
+  return room
 }
 
 // ── Admin callbacks ───────────────────────────────────────────────────────────
@@ -182,7 +202,7 @@ const server = Bun.serve<Session>({
 
     if (pathname === '/ws') {
       const ok = server.upgrade(req, {
-        data: { playerId: '', name: 'Jogador', roomId: null, trucoRoomId: null, gauchoRoomId: null, canastraRoomId: null, tournamentToken: null } as Session,
+        data: { playerId: '', name: 'Jogador', roomId: null, trucoRoomId: null, gauchoRoomId: null, canastraRoomId: null, blackjackRoomId: null, tournamentToken: null } as Session,
       })
       return ok ? undefined : new Response('Upgrade failed', { status: 400 })
     }
@@ -216,6 +236,7 @@ const server = Bun.serve<Session>({
       send(ws, { type: 'truco_room_list', rooms: trucoRoomList() })
       send(ws, { type: 'gaucho_room_list', rooms: gauchoRoomList() })
       send(ws, { type: 'canastra_room_list', rooms: canastraRoomList() })
+      send(ws, { type: 'blackjack_lobby_stats', ...blackjackLobbyStats() })
       send(ws, { type: 'tournament_info', tournament: activeTournament?.info() ?? null })
     },
 
@@ -281,11 +302,21 @@ const server = Bun.serve<Session>({
               existing.canastraRoomId = null
             }
           }
+          // Reconnect to Blackjack room
+          if (existing.blackjackRoomId) {
+            const blackjackRoom = blackjackRooms.get(existing.blackjackRoomId)
+            if (blackjackRoom) {
+              session.blackjackRoomId = existing.blackjackRoomId
+              blackjackRoom.reconnect(pid, emit)
+            } else {
+              existing.blackjackRoomId = null
+            }
+          }
           // Update send fn
           existing.name = session.name
           session.tournamentToken = session.tournamentToken ?? existing.tournamentToken
         } else {
-          playerSessions.set(pid, { playerId: pid, name: session.name, roomId: null, trucoRoomId: null, gauchoRoomId: null, canastraRoomId: null, tournamentToken: session.tournamentToken })
+          playerSessions.set(pid, { playerId: pid, name: session.name, roomId: null, trucoRoomId: null, gauchoRoomId: null, canastraRoomId: null, blackjackRoomId: null, tournamentToken: session.tournamentToken })
         }
 
         // Restore tournament registration
@@ -631,6 +662,57 @@ const server = Bun.serve<Session>({
           break
         }
 
+        // ── Blackjack / 21 ───────────────────────────────────────────────────
+        case 'blackjack_join': {
+          if (session.blackjackRoomId) break // already seated
+          const room = findOrCreateBlackjackRoom()
+          room.join(session.playerId, session.name, emit)
+          session.blackjackRoomId = room.id
+          setPersistentBlackjackRoom(session.playerId, room.id)
+          break
+        }
+
+        case 'blackjack_leave_room':
+          leaveBlackjackRoom(ws)
+          emit({ type: 'blackjack_room_left', reason: 'manual' })
+          break
+
+        case 'blackjack_place_bet': {
+          const room = currentBlackjackRoom(session)
+          room?.handlePlaceBet(session.playerId, msg.amount)
+          break
+        }
+
+        case 'blackjack_insurance_bet': {
+          const room = currentBlackjackRoom(session)
+          room?.handlePlaceInsurance(session.playerId, msg.amount)
+          break
+        }
+
+        case 'blackjack_hit': {
+          const room = currentBlackjackRoom(session)
+          room?.handleHit(session.playerId)
+          break
+        }
+
+        case 'blackjack_stand': {
+          const room = currentBlackjackRoom(session)
+          room?.handleStand(session.playerId)
+          break
+        }
+
+        case 'blackjack_double': {
+          const room = currentBlackjackRoom(session)
+          room?.handleDouble(session.playerId)
+          break
+        }
+
+        case 'blackjack_split': {
+          const room = currentBlackjackRoom(session)
+          room?.handleSplit(session.playerId)
+          break
+        }
+
         // ── Tournament registration ─────────────────────────────────────────
         case 'register_tournament': {
           if (!activeTournament) { emit({ type: 'tournament_error', message: 'Nenhum torneio disponível.' }); break }
@@ -660,6 +742,11 @@ const server = Bun.serve<Session>({
       logger.info('player_disconnected', { 'poker.player_id': ws.data.playerId || null })
       // Lobby players stay in their room (persistent session handles reconnect)
       // Tournament players stay registered via token cookie
+      // Blackjack is the one exception: closing the tab counts as leaving —
+      // same as clicking "Sair da mesa" — so the table doesn't sit waiting
+      // on a seat/turn that can never act again, and the seat/chips aren't
+      // held for a comeback (see .claude/Blackjack.md → "Sair da mesa").
+      if (ws.data.blackjackRoomId) leaveBlackjackRoom(ws)
     },
   },
 })
@@ -738,6 +825,23 @@ function setPersistentCanastraRoom(pid: string, canastraRoomId: string | null): 
   if (ps) ps.canastraRoomId = canastraRoomId
 }
 
+function leaveBlackjackRoom(ws: { data: Session }): void {
+  const { playerId, blackjackRoomId } = ws.data
+  if (!blackjackRoomId) return
+  const room = blackjackRooms.get(blackjackRoomId)
+  if (room) {
+    room.leave(playerId)
+    if (room.playerCount === 0) { room.destroy(); blackjackRooms.delete(blackjackRoomId) }
+  }
+  ws.data.blackjackRoomId = null
+  setPersistentBlackjackRoom(playerId, null)
+}
+
+function setPersistentBlackjackRoom(pid: string, blackjackRoomId: string | null): void {
+  const ps = playerSessions.get(pid)
+  if (ps) ps.blackjackRoomId = blackjackRoomId
+}
+
 function setPersistentToken(pid: string, token: string | null): void {
   const ps = playerSessions.get(pid)
   if (ps) ps.tournamentToken = token
@@ -760,6 +864,14 @@ function broadcastGauchoRoomList(): void {
 }
 function broadcastCanastraRoomList(): void {
   server.publish('lobby', JSON.stringify({ type: 'canastra_room_list', rooms: canastraRoomList() } satisfies ServerMessage))
+}
+function blackjackLobbyStats(): { tableCount: number; playerCount: number } {
+  let playerCount = 0
+  for (const r of blackjackRooms.values()) playerCount += r.playerCount
+  return { tableCount: blackjackRooms.size, playerCount }
+}
+function broadcastBlackjackLobbyStats(): void {
+  server.publish('lobby', JSON.stringify({ type: 'blackjack_lobby_stats', ...blackjackLobbyStats() } satisfies ServerMessage))
 }
 function broadcastTournamentInfo(): void {
   server.publish('lobby', JSON.stringify({ type: 'tournament_info', tournament: activeTournament?.info() ?? null } satisfies ServerMessage))
