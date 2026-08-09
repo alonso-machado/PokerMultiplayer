@@ -810,3 +810,9 @@ input:focus { border-color: var(--gold); }
 .gf-my-books { display: flex; gap: 0.4rem; flex-wrap: wrap; justify-content: center; }
 .gf-book-badge { font-size: 0.72rem; font-weight: 700; color: var(--gold-light); background: rgba(201,168,76,0.12); border-radius: 8px; padding: 0.15rem 0.5rem; }
 .gf-rank-row { flex-wrap: wrap; }
+
+/* ── Push Your Luck Draw (reuses the .truco-table shell) ───────────────────── */
+.pyl-player-badge { cursor: default; display: flex; flex-direction: column; gap: 0.25rem; align-items: center; }
+.pyl-busted { opacity: 0.55; }
+.pyl-mini-hand { display: flex; flex-wrap: wrap; gap: 2px; justify-content: center; max-width: 220px; }
+.pyl-ace-wrap { filter: drop-shadow(0 0 4px rgba(201,168,76,0.85)); border-radius: 6px; }

@@ -14,9 +14,10 @@ publicadas por terceiros), **este documento é a única fonte da verdade** —
 não existe "regra oficial" externa a conferir depois. Qualquer ajuste de
 regra deve ser discutido e atualizado aqui antes de mudar o código.
 
-> ⚠️ Este documento ainda **não tem código correspondente**. É a fonte da
-> verdade para quando `server/src/pushyourluckdraw/` for criado — ver
-> [Plano de Implementação](#plano-de-implementação) no fim.
+✅ Implementado em `server/src/pushyourluckdraw/` (+ `server/src/pushyourluckdrawRoom.ts`)
+e `front/src/{hooks,components}/*PushYourLuckDraw*`. Este documento continua
+sendo a fonte da verdade das regras — ver [Plano de Implementação](#plano-de-implementação)
+no fim pra como o código está organizado.
 
 ---
 
@@ -334,17 +335,28 @@ jogadores reais, então não tem uma fase equivalente à "jogada do dealer".
 ### Tipos compartilhados (`shared/types.ts`)
 
 Mensagens com prefixo `pushyourluckdraw_` (`pushyourluckdraw_room_joined`,
-`pushyourluckdraw_state`, `pushyourluckdraw_draw`, `pushyourluckdraw_stop`,
-`pushyourluckdraw_round_result`, `pushyourluckdraw_match_complete`, etc.).
-**Precisa de um tipo de carta próprio** (diferente do Go Fish, que reusa
-`Card` comum) porque o baralho não é um baralho padrão de 52 — sugestão:
+`pushyourluckdraw_round_started`, `pushyourluckdraw_draw_result`,
+`pushyourluckdraw_stop_result`, `pushyourluckdraw_round_end`,
+`pushyourluckdraw_match_end`, etc. — ver o arquivo de tipos pra lista
+completa). **Precisa de um tipo de carta próprio** (diferente do Go Fish,
+que reusa `Card` comum) porque o baralho não é um baralho padrão de 52 —
+implementado no mesmo formato do `CanastraCard` (id único + `suit`/`rank`
+nuláveis pro coringa), não como a união por `kind` cogitada originalmente
+aqui — mais simples e já é o padrão que o resto do código usa pra baralhos
+não convencionais:
 
 ```ts
-type PushYourLuckDrawCard =
-  | { kind: 'ace_of_spades' }
-  | { kind: 'number'; value: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 }
-  | { kind: 'joker'; id: string } // id único — 4 cópias indistinguíveis por valor
+interface PushYourLuckDrawCard {
+  id: string          // único por carta física — muitos ranks têm cópias duplicadas
+  suit: Suit | null    // null quando isJoker; o Ás de Espadas é suit:'spades', rank:'A' (única cópia do baralho inteiro)
+  rank: Rank | null    // null quando isJoker
+  isJoker: boolean
+}
 ```
+
+Todas as mãos da rodada são **públicas** (`PushYourLuckDrawPlayer.roundHand`
+vai pra todo mundo) — diferente de todos os outros jogos do catálogo, não
+há mensagem de "mão privada" nenhuma aqui.
 
 ### Arquitetura (front)
 
@@ -365,16 +377,22 @@ front/src/components/PushYourLuckDrawGuide.tsx   # painel de regras, shell .hand
 
 Roteamento em `App.tsx`: nova aba `🍀 Push Your Luck`.
 
-### Fases sugeridas de implementação
+### Status
 
-1. **Motor puro** (`gameEngine.ts` + `deck.ts` + testes `bun test`):
+Todas as fases abaixo foram implementadas:
+
+1. ✅ **Motor puro** (`gameEngine.ts` + `deck.ts` + `server/test/pushyourluckdraw.test.ts`):
    composição do baralho, turnos pedir/parar, checagem de duplicata,
    salvamento por coringa, multiplicador do Ás, pontuação, esgotamento de
-   monte, fim de partida — sem rede.
-2. **`PushYourLuckDrawRoom` + roteamento no `index.ts`**.
-3. **Front**: hook + lobby + tabela + guia.
-4. **Testes de integração** ponta a ponta (opcional, se o padrão dos
-   outros jogos tiver isso).
+   monte (ambos os modos de baralho), gating de fim de partida (só no
+   limite da rodada, maior total vence).
+2. ✅ **`PushYourLuckDrawRoom` + roteamento no `index.ts`**.
+3. ✅ **Front**: `usePushYourLuckDrawGame` + `PushYourLuckDrawLobby` +
+   `PushYourLuckDrawTable` + `PushYourLuckDrawGuide`, aba `🍀 Push Your
+   Luck` no `App.tsx`.
+4. Testes de integração ponta a ponta (WebSocket real) — não implementados,
+   mesmo estado dos outros jogos do catálogo (só o Go Fish tem essa
+   cobertura via `test/gofish.test.ts`, e mesmo assim só no nível do motor).
 
 Antes de qualquer commit tocando isso: `cd server && bun test` e/ou
 `cd front && bun x tsc -b`, conforme a Regra #1 do `CLAUDE.md`.

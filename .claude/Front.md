@@ -175,6 +175,29 @@ Truco/Gaúcho/Canastra).
 - `GoFishGuide.tsx` — painel de regras (reutiliza o shell CSS
   `.hand-guide-*` do `HandGuide.tsx`).
 
+## Push Your Luck Draw
+
+Aba separada (`🍀 Push Your Luck` no seletor de jogo). Estado isolado via
+`usePushYourLuckDrawGame` (`hooks/usePushYourLuckDrawGame.ts`), um
+`useReducer` que recebe qualquer `ServerMessage` cujo `type` comece com
+`pushyourluckdraw_`, mesmo padrão do Go Fish/Canastra/Truco.
+
+- `PushYourLuckDrawLobby.tsx` — criar/listar mesas (nome, máximo de
+  jogadores 2-8, pontuação-alvo padrão 150, modo de baralho fresco/persistente).
+- `PushYourLuckDrawTable.tsx` — mesa: placar total de todos, jogador da
+  vez em destaque, **mão da rodada de cada jogador visível** (é o único
+  jogo do catálogo sem mão privada), Coringas guardados por jogador,
+  botões Pedir carta/Parar na minha vez, contador de cartas no monte,
+  overlay de fim de rodada e fim de partida/revanche. Usa um wrapper local
+  (`PushYourLuckDrawCardFace`, mesmo padrão do `CanastraCardFace`) que cai
+  pro `PlayingCard` comum quando a carta não é um coringa.
+- `PushYourLuckDrawGuide.tsx` — painel de regras (reutiliza o shell CSS
+  `.hand-guide-*` do `HandGuide.tsx`).
+
+**Cartas:** usa `PushYourLuckDrawCard` (não `Card`) — tem `id` único (muitos
+ranks têm cópias duplicadas) e `suit`/`rank` nuláveis pro coringa, mesmo
+formato do `CanastraCard`.
+
 ## Observabilidade (Front)
 
 Observabilidade client-side é feita via **PostHog**:

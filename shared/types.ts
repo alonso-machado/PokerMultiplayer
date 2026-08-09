@@ -138,6 +138,8 @@ export type ClientMessage =
   | BlackjackClientMessage
   // Go Fish (see below)
   | GoFishClientMessage
+  // Push Your Luck Draw (see below)
+  | PushYourLuckDrawClientMessage
 
 // ─── WebSocket: Server → Client ───────────────────────────────────────────────
 
@@ -200,6 +202,8 @@ export type ServerMessage =
   | BlackjackServerMessage
   // ── Go Fish (see below) ───────────────────────────────────────────────────
   | GoFishServerMessage
+  // ── Push Your Luck Draw (see below) ───────────────────────────────────────
+  | PushYourLuckDrawServerMessage
 
 export interface ShowdownResult {
   playerId: string
@@ -784,3 +788,112 @@ export type GoFishServerMessage =
   | { type: 'gofish_round_end'; players: GoFishPlayer[]; tableState: GoFishTableState; winnerIds: string[]; matchWins: Record<string, number> }
   /** Broadcast — rematch vote progress */
   | { type: 'gofish_rematch_status'; accepted: string[]; pending: string[] }
+
+// ─── Push Your Luck Draw ────────────────────────────────────────────────────
+// See .claude/PushYourLuckDraw.md for the full rules this section's types
+// model. Original ruleset (not adapted from a published game) — push-your-luck
+// "draw or stop", bust on drawing a rank you already hold this round, with a
+// Joker "save" and an Ace of Spades ×2 multiplier. Uses its own card shape
+// (same pattern as CanastraCard) because the deck isn't a standard 52: copy
+// count per rank equals the rank's value (the 7 has 7 copies, the K has 13),
+// plus 4 Jokers — 95 cards total, no relation to a physical 52-card pack.
+// Architecturally closest to Go Fish for room/lobby joining (free 2-8, no
+// fixed team size, auto-starts 300ms after the 2nd join) crossed with Truco's
+// "several hands/rounds until a target score, then a rematch vote" match loop
+// (unlike Go Fish's "one game played to completion"). All hands are public —
+// no private per-player card messages needed, unlike every other game here.
+
+export type PushYourLuckDrawDeckMode = 'fresh' | 'persistent'
+
+export interface PushYourLuckDrawCard {
+  id: string          // unique per physical card — many ranks have duplicate copies
+  suit: Suit | null    // null when isJoker; the Ace of Spades is suit:'spades', rank:'A' (only 1 in the whole deck)
+  rank: Rank | null    // null when isJoker
+  isJoker: boolean
+}
+
+export interface PushYourLuckDrawRoomConfig {
+  maxPlayers: number    // 2–8
+  targetScore: number   // match ends once someone's total reaches this, default 150
+  deckMode: PushYourLuckDrawDeckMode
+}
+
+export interface PushYourLuckDrawRoomSummary {
+  id: string
+  name: string
+  creatorName: string
+  playerCount: number
+  maxPlayers: number
+  status: RoomStatus
+  config: PushYourLuckDrawRoomConfig
+}
+
+/** 'stood' = locked in this round's score; 'busted' = lost this round's hand,
+ *  scored 0. Both reset to 'active' at the start of the next round. */
+export type PushYourLuckDrawPlayerStatus = 'waiting' | 'active' | 'stood' | 'busted'
+
+export interface PushYourLuckDrawPlayer {
+  id: string
+  name: string
+  status: PushYourLuckDrawPlayerStatus
+  roundHand: PushYourLuckDrawCard[]   // fully public — see .claude/PushYourLuckDraw.md
+  savesHeld: number                   // Jokers banked this round
+  roundScore: number                  // locked once stood/busted, 0 while still active
+  totalScore: number                  // cumulative across the match
+}
+
+export type PushYourLuckDrawPhase = 'waiting' | 'playing' | 'round_complete' | 'match_complete'
+
+export interface PushYourLuckDrawTableState {
+  phase: PushYourLuckDrawPhase
+  turnPlayerId: string | null
+  monteCount: number
+  targetScore: number
+  deckMode: PushYourLuckDrawDeckMode
+}
+
+// ─── WebSocket: Client → Server (Push Your Luck Draw) ──────────────────────
+
+export type PushYourLuckDrawClientMessage =
+  | { type: 'pushyourluckdraw_list_rooms' }
+  | { type: 'pushyourluckdraw_create_room'; roomName: string; config: PushYourLuckDrawRoomConfig }
+  | { type: 'pushyourluckdraw_join_room'; roomId: string }
+  | { type: 'pushyourluckdraw_leave_room' }
+  | { type: 'pushyourluckdraw_start_game' }   // manual fallback — mirrors the lobby's start_game
+  | { type: 'pushyourluckdraw_draw' }
+  | { type: 'pushyourluckdraw_stop' }
+  | { type: 'pushyourluckdraw_rematch_vote'; accept: boolean }
+
+// ─── WebSocket: Server → Client (Push Your Luck Draw) ──────────────────────
+
+export type PushYourLuckDrawServerMessage =
+  | { type: 'pushyourluckdraw_room_list'; rooms: PushYourLuckDrawRoomSummary[] }
+  | { type: 'pushyourluckdraw_room_joined'; roomId: string; roomName: string; config: PushYourLuckDrawRoomConfig; yourId: string }
+  | { type: 'pushyourluckdraw_room_left'; reason?: 'manual' | 'expired' | 'abandoned' | 'rematch_declined' }
+  | { type: 'pushyourluckdraw_room_error'; message: string }
+  | { type: 'pushyourluckdraw_player_list'; players: PushYourLuckDrawPlayer[] }
+  | { type: 'pushyourluckdraw_game_started' }
+  /** Broadcast — a new round was dealt (fresh or continuing monte, per deckMode) */
+  | { type: 'pushyourluckdraw_round_started'; players: PushYourLuckDrawPlayer[]; tableState: PushYourLuckDrawTableState }
+  /** Broadcast — public table/player sync outside of a specific draw/stop (e.g. on reconnect) */
+  | { type: 'pushyourluckdraw_state_update'; players: PushYourLuckDrawPlayer[]; tableState: PushYourLuckDrawTableState }
+  /** Private — sent only to the player whose turn it is */
+  | { type: 'pushyourluckdraw_your_turn'; timeoutSeconds: number }
+  /** Broadcast — result of a draw. card is null only for 'forced_stop' (monte and discard both
+   *  exhausted mid-decision — see .claude/PushYourLuckDraw.md → "Esgotamento do Monte"). */
+  | {
+      type: 'pushyourluckdraw_draw_result'
+      playerId: string
+      outcome: 'drew' | 'joker' | 'saved' | 'busted' | 'forced_stop'
+      card: PushYourLuckDrawCard | null
+      players: PushYourLuckDrawPlayer[]
+      tableState: PushYourLuckDrawTableState
+    }
+  /** Broadcast — a player chose to stop, locking in their round score */
+  | { type: 'pushyourluckdraw_stop_result'; playerId: string; roundScore: number; players: PushYourLuckDrawPlayer[]; tableState: PushYourLuckDrawTableState }
+  /** Broadcast — round ended (everyone stood or busted); totals updated */
+  | { type: 'pushyourluckdraw_round_end'; players: PushYourLuckDrawPlayer[]; tableState: PushYourLuckDrawTableState }
+  /** Broadcast — match ended (someone's total reached the target score) */
+  | { type: 'pushyourluckdraw_match_end'; players: PushYourLuckDrawPlayer[]; winnerIds: string[]; matchWins: Record<string, number> }
+  /** Broadcast — rematch vote progress */
+  | { type: 'pushyourluckdraw_rematch_status'; accepted: string[]; pending: string[] }

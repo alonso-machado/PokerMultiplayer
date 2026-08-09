@@ -1,4 +1,4 @@
-import type { Card, CanastraMeldPlan, CanastraRoomConfig, ClientMessage, GauchoRoomConfig, GoFishRoomConfig, PlayerAction, Rank, RoomConfig, Suit, TrucoRoomConfig } from '../../shared/types'
+import type { Card, CanastraMeldPlan, CanastraRoomConfig, ClientMessage, GauchoRoomConfig, GoFishRoomConfig, PlayerAction, PushYourLuckDrawRoomConfig, Rank, RoomConfig, Suit, TrucoRoomConfig } from '../../shared/types'
 // Blackjack has no room config to validate — see blackjack_join below.
 
 const MAX_PAYLOAD_BYTES = 512
@@ -10,6 +10,7 @@ const VALID_TRUCO_MODES = new Set<string>(['1x1', '2x2'])
 const VALID_MANILHA_VARIANTS = new Set<string>(['vira', 'fixed'])
 const VALID_GAUCHO_MODES = new Set<string>(['1x1', '2x2'])
 const VALID_CANASTRA_MODES = new Set<string>(['1x1', '2x2'])
+const VALID_DECK_MODES = new Set<string>(['fresh', 'persistent'])
 
 function isString(v: unknown): v is string   { return typeof v === 'string' }
 // Signed token: 64-char playerId + '.' + ~43-char base64url HMAC = ~108 chars. Cap at 128.
@@ -74,6 +75,16 @@ function parseGoFishConfig(v: unknown): GoFishRoomConfig | null {
   const maxPlayers = safeInt(c.maxPlayers, 2, 6)
   if (maxPlayers === null) return null
   return { maxPlayers }
+}
+
+function parsePushYourLuckDrawConfig(v: unknown): PushYourLuckDrawRoomConfig | null {
+  if (typeof v !== 'object' || v === null) return null
+  const c = v as Record<string, unknown>
+  const maxPlayers = safeInt(c.maxPlayers, 2, 8)
+  const targetScore = safeInt(c.targetScore, 50, 2000)
+  if (maxPlayers === null || targetScore === null) return null
+  if (!isString(c.deckMode) || !VALID_DECK_MODES.has(c.deckMode)) return null
+  return { maxPlayers, targetScore, deckMode: c.deckMode as PushYourLuckDrawRoomConfig['deckMode'] }
 }
 
 function parseIdArray(v: unknown): string[] | null {
@@ -325,6 +336,28 @@ export function parseClientMessage(raw: unknown): ClientMessage | null {
     case 'gofish_rematch_vote':
       if (!isBool(m.accept)) return null
       return { type: 'gofish_rematch_vote', accept: m.accept }
+
+    // ── Push Your Luck Draw ─────────────────────────────────────────────
+    case 'pushyourluckdraw_list_rooms': return { type: 'pushyourluckdraw_list_rooms' }
+    case 'pushyourluckdraw_leave_room': return { type: 'pushyourluckdraw_leave_room' }
+    case 'pushyourluckdraw_start_game': return { type: 'pushyourluckdraw_start_game' }
+    case 'pushyourluckdraw_draw': return { type: 'pushyourluckdraw_draw' }
+    case 'pushyourluckdraw_stop': return { type: 'pushyourluckdraw_stop' }
+
+    case 'pushyourluckdraw_create_room': {
+      if (!isSafeRoomName(m.roomName)) return null
+      const config = parsePushYourLuckDrawConfig(m.config)
+      if (!config) return null
+      return { type: 'pushyourluckdraw_create_room', roomName: m.roomName as string, config }
+    }
+
+    case 'pushyourluckdraw_join_room':
+      if (!isSafeId(m.roomId)) return null
+      return { type: 'pushyourluckdraw_join_room', roomId: m.roomId as string }
+
+    case 'pushyourluckdraw_rematch_vote':
+      if (!isBool(m.accept)) return null
+      return { type: 'pushyourluckdraw_rematch_vote', accept: m.accept }
 
     default:
       return null

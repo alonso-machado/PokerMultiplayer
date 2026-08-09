@@ -16,6 +16,7 @@ import { GauchoRoom } from './gauchoRoom'
 import { CanastraRoom } from './canastraRoom'
 import { BlackjackRoom } from './blackjackRoom'
 import { GoFishRoom } from './gofishRoom'
+import { PushYourLuckDrawRoom } from './pushyourluckdrawRoom'
 import { Tournament } from './tournament'
 import { adminRouter, publicTournamentHandler } from './admin'
 
@@ -27,6 +28,7 @@ const gauchoRooms = new Map<string, GauchoRoom>()
 const canastraRooms = new Map<string, CanastraRoom>()
 const blackjackRooms = new Map<string, BlackjackRoom>()
 const gofishRooms = new Map<string, GoFishRoom>()
+const pushyourluckdrawRooms = new Map<string, PushYourLuckDrawRoom>()
 let activeTournament: Tournament | null = null
 
 // ── Persistent player sessions (survive WS reconnect) ─────────────────────────
@@ -39,6 +41,7 @@ interface PersistentSession {
   canastraRoomId: string | null
   blackjackRoomId: string | null
   gofishRoomId: string | null
+  pushyourluckdrawRoomId: string | null
   tournamentToken: string | null
 }
 const playerSessions = new Map<string, PersistentSession>()
@@ -53,6 +56,7 @@ interface Session {
   canastraRoomId: string | null
   blackjackRoomId: string | null
   gofishRoomId: string | null
+  pushyourluckdrawRoomId: string | null
   tournamentToken: string | null
 }
 
@@ -106,6 +110,10 @@ function currentBlackjackRoom(session: Session): BlackjackRoom | undefined {
 
 function currentGoFishRoom(session: Session): GoFishRoom | undefined {
   return session.gofishRoomId ? gofishRooms.get(session.gofishRoomId) : undefined
+}
+
+function currentPushYourLuckDrawRoom(session: Session): PushYourLuckDrawRoom | undefined {
+  return session.pushyourluckdrawRoomId ? pushyourluckdrawRooms.get(session.pushyourluckdrawRoomId) : undefined
 }
 
 /** Matchmaking — Blackjack has no room creation/browsing (see .claude/Blackjack.md):
@@ -210,7 +218,7 @@ const server = Bun.serve<Session>({
 
     if (pathname === '/ws') {
       const ok = server.upgrade(req, {
-        data: { playerId: '', name: 'Jogador', roomId: null, trucoRoomId: null, gauchoRoomId: null, canastraRoomId: null, blackjackRoomId: null, gofishRoomId: null, tournamentToken: null } as Session,
+        data: { playerId: '', name: 'Jogador', roomId: null, trucoRoomId: null, gauchoRoomId: null, canastraRoomId: null, blackjackRoomId: null, gofishRoomId: null, pushyourluckdrawRoomId: null, tournamentToken: null } as Session,
       })
       return ok ? undefined : new Response('Upgrade failed', { status: 400 })
     }
@@ -246,6 +254,7 @@ const server = Bun.serve<Session>({
       send(ws, { type: 'canastra_room_list', rooms: canastraRoomList() })
       send(ws, { type: 'blackjack_lobby_stats', ...blackjackLobbyStats() })
       send(ws, { type: 'gofish_room_list', rooms: gofishRoomList() })
+      send(ws, { type: 'pushyourluckdraw_room_list', rooms: pushyourluckdrawRoomList() })
       send(ws, { type: 'tournament_info', tournament: activeTournament?.info() ?? null })
     },
 
@@ -331,11 +340,21 @@ const server = Bun.serve<Session>({
               existing.gofishRoomId = null
             }
           }
+          // Reconnect to Push Your Luck Draw room
+          if (existing.pushyourluckdrawRoomId) {
+            const pushyourluckdrawRoom = pushyourluckdrawRooms.get(existing.pushyourluckdrawRoomId)
+            if (pushyourluckdrawRoom) {
+              session.pushyourluckdrawRoomId = existing.pushyourluckdrawRoomId
+              pushyourluckdrawRoom.reconnect(pid, emit)
+            } else {
+              existing.pushyourluckdrawRoomId = null
+            }
+          }
           // Update send fn
           existing.name = session.name
           session.tournamentToken = session.tournamentToken ?? existing.tournamentToken
         } else {
-          playerSessions.set(pid, { playerId: pid, name: session.name, roomId: null, trucoRoomId: null, gauchoRoomId: null, canastraRoomId: null, blackjackRoomId: null, gofishRoomId: null, tournamentToken: session.tournamentToken })
+          playerSessions.set(pid, { playerId: pid, name: session.name, roomId: null, trucoRoomId: null, gauchoRoomId: null, canastraRoomId: null, blackjackRoomId: null, gofishRoomId: null, pushyourluckdrawRoomId: null, tournamentToken: session.tournamentToken })
         }
 
         // Restore tournament registration
@@ -784,6 +803,64 @@ const server = Bun.serve<Session>({
           break
         }
 
+        // ── Push Your Luck Draw ───────────────────────────────────────────
+        case 'pushyourluckdraw_list_rooms': emit({ type: 'pushyourluckdraw_room_list', rooms: pushyourluckdrawRoomList() }); break
+
+        case 'pushyourluckdraw_create_room': {
+          const room = new PushYourLuckDrawRoom(generateId(), msg.roomName.trim().slice(0, 40) || 'Mesa', session.name, msg.config, {
+            onExpire: () => { pushyourluckdrawRooms.delete(room.id); broadcastPushYourLuckDrawRoomList() },
+            onDissolve: () => { pushyourluckdrawRooms.delete(room.id); broadcastPushYourLuckDrawRoomList() },
+          })
+          pushyourluckdrawRooms.set(room.id, room)
+          room.join(session.playerId, session.name, emit)   // creator auto-joins
+          session.pushyourluckdrawRoomId = room.id
+          setPersistentPushYourLuckDrawRoom(session.playerId, room.id)
+          broadcastPushYourLuckDrawRoomList()
+          break
+        }
+
+        case 'pushyourluckdraw_join_room': {
+          const room = pushyourluckdrawRooms.get(msg.roomId)
+          if (!room)       { emit({ type: 'pushyourluckdraw_room_error', message: 'Mesa não encontrada.' }); break }
+          if (room.isFull) { emit({ type: 'pushyourluckdraw_room_error', message: 'Mesa cheia.' }); break }
+          if (room.isStarted) { emit({ type: 'pushyourluckdraw_room_error', message: 'Partida em andamento.' }); break }
+          if (session.pushyourluckdrawRoomId) leavePushYourLuckDrawRoom(ws)
+          room.join(session.playerId, session.name, emit)
+          session.pushyourluckdrawRoomId = room.id
+          setPersistentPushYourLuckDrawRoom(session.playerId, room.id)
+          broadcastPushYourLuckDrawRoomList()
+          break
+        }
+
+        case 'pushyourluckdraw_leave_room':
+          leavePushYourLuckDrawRoom(ws)
+          emit({ type: 'pushyourluckdraw_room_left', reason: 'manual' })
+          break
+
+        case 'pushyourluckdraw_start_game': {
+          const room = currentPushYourLuckDrawRoom(session)
+          room?.startMatch(session.playerId)
+          break
+        }
+
+        case 'pushyourluckdraw_draw': {
+          const room = currentPushYourLuckDrawRoom(session)
+          room?.handleDraw(session.playerId)
+          break
+        }
+
+        case 'pushyourluckdraw_stop': {
+          const room = currentPushYourLuckDrawRoom(session)
+          room?.handleStop(session.playerId)
+          break
+        }
+
+        case 'pushyourluckdraw_rematch_vote': {
+          const room = currentPushYourLuckDrawRoom(session)
+          room?.handleRematchVote(session.playerId, msg.accept)
+          break
+        }
+
         // ── Tournament registration ─────────────────────────────────────────
         case 'register_tournament': {
           if (!activeTournament) { emit({ type: 'tournament_error', message: 'Nenhum torneio disponível.' }); break }
@@ -931,6 +1008,24 @@ function setPersistentGoFishRoom(pid: string, gofishRoomId: string | null): void
   if (ps) ps.gofishRoomId = gofishRoomId
 }
 
+function leavePushYourLuckDrawRoom(ws: { data: Session }): void {
+  const { playerId, pushyourluckdrawRoomId } = ws.data
+  if (!pushyourluckdrawRoomId) return
+  const room = pushyourluckdrawRooms.get(pushyourluckdrawRoomId)
+  if (room) {
+    room.leave(playerId)
+    if (room.playerCount === 0) { room.destroy(); pushyourluckdrawRooms.delete(pushyourluckdrawRoomId) }
+  }
+  ws.data.pushyourluckdrawRoomId = null
+  setPersistentPushYourLuckDrawRoom(playerId, null)
+  broadcastPushYourLuckDrawRoomList()
+}
+
+function setPersistentPushYourLuckDrawRoom(pid: string, pushyourluckdrawRoomId: string | null): void {
+  const ps = playerSessions.get(pid)
+  if (ps) ps.pushyourluckdrawRoomId = pushyourluckdrawRoomId
+}
+
 function setPersistentToken(pid: string, token: string | null): void {
   const ps = playerSessions.get(pid)
   if (ps) ps.tournamentToken = token
@@ -942,6 +1037,7 @@ function trucoRoomList()  { return [...trucoRooms.values()].map(r => r.summary()
 function gauchoRoomList() { return [...gauchoRooms.values()].map(r => r.summary()) }
 function canastraRoomList() { return [...canastraRooms.values()].map(r => r.summary()) }
 function gofishRoomList() { return [...gofishRooms.values()].map(r => r.summary()) }
+function pushyourluckdrawRoomList() { return [...pushyourluckdrawRooms.values()].map(r => r.summary()) }
 
 function broadcastRoomList(): void {
   server.publish('lobby', JSON.stringify({ type: 'room_list', rooms: lobbyRoomList() } satisfies ServerMessage))
@@ -957,6 +1053,9 @@ function broadcastCanastraRoomList(): void {
 }
 function broadcastGoFishRoomList(): void {
   server.publish('lobby', JSON.stringify({ type: 'gofish_room_list', rooms: gofishRoomList() } satisfies ServerMessage))
+}
+function broadcastPushYourLuckDrawRoomList(): void {
+  server.publish('lobby', JSON.stringify({ type: 'pushyourluckdraw_room_list', rooms: pushyourluckdrawRoomList() } satisfies ServerMessage))
 }
 function blackjackLobbyStats(): { tableCount: number; playerCount: number } {
   let playerCount = 0

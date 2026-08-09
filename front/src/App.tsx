@@ -11,6 +11,7 @@ import { useGauchoGame } from './hooks/useGauchoGame'
 import { useCanastraGame } from './hooks/useCanastraGame'
 import { useBlackjackGame } from './hooks/useBlackjackGame'
 import { useGoFishGame } from './hooks/useGoFishGame'
+import { usePushYourLuckDrawGame } from './hooks/usePushYourLuckDrawGame'
 import { getOrCreateIdentity, saveName, saveIdentityToken, saveTournamentToken, clearTournamentToken } from './hooks/usePlayerToken'
 import { Lobby } from './components/Lobby'
 import { TournamentTab } from './components/TournamentTab'
@@ -25,13 +26,15 @@ import { BlackjackLobby } from './components/BlackjackLobby'
 import { BlackjackTable } from './components/BlackjackTable'
 import { GoFishLobby } from './components/GoFishLobby'
 import { GoFishTable } from './components/GoFishTable'
+import { PushYourLuckDrawLobby } from './components/PushYourLuckDrawLobby'
+import { PushYourLuckDrawTable } from './components/PushYourLuckDrawTable'
 import { HandGuide } from './components/HandGuide'
 import { AdminPage } from './pages/AdminPage'
-import type { TrucoRoomSummary, GauchoRoomSummary, CanastraRoomSummary, GoFishRoomSummary } from '../../shared/types'
+import type { TrucoRoomSummary, GauchoRoomSummary, CanastraRoomSummary, GoFishRoomSummary, PushYourLuckDrawRoomSummary } from '../../shared/types'
 
 interface TurnState { validActions: PlayerAction[]; callAmount: number; minRaise: number }
 interface ShowdownEntry { playerId: string; playerName: string; cards: Card[]; bestCards: Card[]; handName: string; won: number }
-type GameGroup = 'poker' | 'truco' | 'gaucho' | 'canastra' | 'blackjack' | 'gofish'
+type GameGroup = 'poker' | 'truco' | 'gaucho' | 'canastra' | 'blackjack' | 'gofish' | 'pushyourluckdraw'
 type PokerTab = 'rooms' | 'tournament'
 
 const identity = getOrCreateIdentity()
@@ -60,6 +63,8 @@ function AppInner() {
   const [blackjackStats, setBlackjackStats] = useState({ tableCount: 0, playerCount: 0 })
   const [gofishRooms, setGofishRooms] = useState<GoFishRoomSummary[]>([])
   const { gofishState, handleGoFishMessage } = useGoFishGame(identity.playerId)
+  const [pushYourLuckDrawRooms, setPushYourLuckDrawRooms] = useState<PushYourLuckDrawRoomSummary[]>([])
+  const { pushYourLuckDrawState, handlePushYourLuckDrawMessage } = usePushYourLuckDrawGame(identity.playerId)
 
   // Tournament
   const [tournamentInfo,       setTournamentInfo]       = useState<TournamentInfo | null>(null)
@@ -102,6 +107,7 @@ function AppInner() {
       case 'canastra_room_list': setCanastraRooms(msg.rooms); break
       case 'blackjack_lobby_stats': setBlackjackStats({ tableCount: msg.tableCount, playerCount: msg.playerCount }); break
       case 'gofish_room_list': setGofishRooms(msg.rooms); break
+      case 'pushyourluckdraw_room_list': setPushYourLuckDrawRooms(msg.rooms); break
       case 'tournament_info':
         // A brand-new tournament (different id) means our previous registration
         // token is stale — let the player register again for this one.
@@ -225,9 +231,10 @@ function AppInner() {
         else if (msg.type.startsWith('canastra_')) handleCanastraMessage(msg)
         else if (msg.type.startsWith('blackjack_')) handleBlackjackMessage(msg)
         else if (msg.type.startsWith('gofish_')) handleGoFishMessage(msg)
+        else if (msg.type.startsWith('pushyourluckdraw_')) handlePushYourLuckDrawMessage(msg)
         break
     }
-  }, [posthog?.capture, handleTrucoMessage, handleGauchoMessage, handleCanastraMessage, handleBlackjackMessage, handleGoFishMessage])
+  }, [posthog?.capture, handleTrucoMessage, handleGauchoMessage, handleCanastraMessage, handleBlackjackMessage, handleGoFishMessage, handlePushYourLuckDrawMessage])
 
   const { send } = useSocket(identity, handleMessage)
 
@@ -266,6 +273,31 @@ function AppInner() {
         onStand={() => send({ type: 'blackjack_stand' })}
         onDouble={() => send({ type: 'blackjack_double' })}
         onSplit={() => send({ type: 'blackjack_split' })}
+      />
+    )
+  }
+
+  if (pushYourLuckDrawState.roomId && pushYourLuckDrawState.config) {
+    return (
+      <PushYourLuckDrawTable
+        myId={pushYourLuckDrawState.myId}
+        roomName={pushYourLuckDrawState.roomName}
+        config={pushYourLuckDrawState.config}
+        players={pushYourLuckDrawState.players}
+        tableState={pushYourLuckDrawState.tableState}
+        isStarted={pushYourLuckDrawState.isStarted}
+        myTurn={pushYourLuckDrawState.myTurn}
+        turnDeadline={pushYourLuckDrawState.turnDeadline}
+        lastDraw={pushYourLuckDrawState.lastDraw}
+        lastStop={pushYourLuckDrawState.lastStop}
+        roundEnd={pushYourLuckDrawState.roundEnd}
+        matchEnd={pushYourLuckDrawState.matchEnd}
+        rematch={pushYourLuckDrawState.rematch}
+        onLeave={() => send({ type: 'pushyourluckdraw_leave_room' })}
+        onStartGame={() => send({ type: 'pushyourluckdraw_start_game' })}
+        onDraw={() => send({ type: 'pushyourluckdraw_draw' })}
+        onStop={() => send({ type: 'pushyourluckdraw_stop' })}
+        onRematchVote={(accept) => send({ type: 'pushyourluckdraw_rematch_vote', accept })}
       />
     )
   }
@@ -415,7 +447,8 @@ function AppInner() {
           : activeGame === 'gaucho' ? '🧉 Truco Gaúcho'
           : activeGame === 'canastra' ? '🎴 Canastra / Buraco'
           : activeGame === 'blackjack' ? '🂡 Blackjack / 21'
-          : '🎣 Go Fish'}
+          : activeGame === 'gofish' ? '🎣 Go Fish'
+          : '🍀 Push Your Luck Draw'}
       </h1>
       <p className="subtitle">
         {activeGame === 'poker' ? 'Poker multiplayer em tempo real'
@@ -423,7 +456,8 @@ function AppInner() {
           : activeGame === 'gaucho' ? 'Truco Gaúcho / Espanhol — com Envido e Flor'
           : activeGame === 'canastra' ? 'Canastra / Buraco multiplayer — 1x1 ou 2x2'
           : activeGame === 'blackjack' ? 'Blackjack / 21 — você contra o dealer, até 7 na mesa'
-          : 'Go Fish multiplayer — 2 a 6 jogadores, forme os 13 baralhos'}
+          : activeGame === 'gofish' ? 'Go Fish multiplayer — 2 a 6 jogadores, forme os 13 baralhos'
+          : 'Push Your Luck Draw — 2 a 8 jogadores, peça carta ou pare antes de estourar'}
       </p>
       <NameRow name={myName} onSave={setMyName} />
 
@@ -434,6 +468,7 @@ function AppInner() {
         <button type="button" className={`tab${activeGame === 'canastra' ? ' active' : ''}`} onClick={() => setActiveGame('canastra')}>🎴 Canastra</button>
         <button type="button" className={`tab${activeGame === 'blackjack' ? ' active' : ''}`} onClick={() => setActiveGame('blackjack')}>🂡 Blackjack / 21</button>
         <button type="button" className={`tab${activeGame === 'gofish' ? ' active' : ''}`} onClick={() => setActiveGame('gofish')}>🎣 Go Fish</button>
+        <button type="button" className={`tab${activeGame === 'pushyourluckdraw' ? ' active' : ''}`} onClick={() => setActiveGame('pushyourluckdraw')}>🍀 Push Your Luck</button>
       </div>
 
       {activeGame === 'poker' && (
@@ -501,6 +536,14 @@ function AppInner() {
           rooms={gofishRooms}
           onCreateRoom={(name, cfg) => send({ type: 'gofish_create_room', roomName: name, config: cfg })}
           onJoinRoom={(id) => send({ type: 'gofish_join_room', roomId: id })}
+        />
+      )}
+
+      {activeGame === 'pushyourluckdraw' && (
+        <PushYourLuckDrawLobby
+          rooms={pushYourLuckDrawRooms}
+          onCreateRoom={(name, cfg) => send({ type: 'pushyourluckdraw_create_room', roomName: name, config: cfg })}
+          onJoinRoom={(id) => send({ type: 'pushyourluckdraw_join_room', roomId: id })}
         />
       )}
     </div>

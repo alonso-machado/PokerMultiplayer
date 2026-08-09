@@ -134,6 +134,36 @@ jogador entrar, com `gofish_start_game` manual como fallback).
   `session.gofishRoomId` + `currentGoFishRoom()`, espelhando
   `currentCanastraRoom()`.
 
+## Push Your Luck Draw
+
+Sistema totalmente paralelo — regra **original** (não adaptada de terceiros),
+ver `.claude/PushYourLuckDraw.md`. Arquitetura híbrida: entrada de sala livre
+2-8 sem times (como o Go Fish, auto-start 300ms após o 2º join), mas o loop
+de partida repete **várias rodadas até alguém atingir a pontuação-alvo**
+(como o Truco: `round_end`/`match_end` + votação de revanche), diferente do
+Go Fish (uma partida = um jogo só até o fim). Todas as mãos da rodada são
+**públicas** — não há mensagem de mão privada, único jogo do catálogo assim.
+
+- `pushyourluckdraw/deck.ts` — baralho próprio de 95 cartas: cópias(rank) =
+  valor(rank) para todo rank numerado/de figura (o 7 tem 7 cópias, o K tem
+  13), 1 Ás de Espadas (multiplicador ×2) e 4 Coringas (save).
+- `pushyourluckdraw/gameEngine.ts` (`PushYourLuckDrawGame`) — máquina de
+  estados de uma partida: turnos pedir/parar (1 decisão por turno, sempre
+  passa a vez), estouro por duplicata de rank, salvamento por Coringa,
+  multiplicador do Ás, dois modos de baralho (`fresh` reconstrói 95 cartas
+  a cada rodada; `persistent` mantém monte/descarte entre rodadas dentro da
+  mesma partida, só reembaralhando ao esgotar), fim de rodada só quando
+  todos pararam/estouraram, fim de partida só no limite da rodada (nunca no
+  meio) com o **maior total** vencendo — não necessariamente quem cruzou o
+  alvo primeiro.
+- `pushyourluckdrawRoom.ts` (`PushYourLuckDrawRoom`) — assentos livres,
+  ciclo de rodadas/partida, votação de revanche, timeout de turno
+  (`PUSHYOURLUCKDRAW_TIMEOUT`, default 20s — **para automaticamente**, nunca
+  compra carta às cegas).
+- `index.ts`: `pushyourluckdrawRooms` é um `Map` separado; roteamento via
+  `session.pushyourluckdrawRoomId` + `currentPushYourLuckDrawRoom()`,
+  espelhando `currentGoFishRoom()`.
+
 ## Rotas HTTP
 
 | Método | Path | Auth | Descrição |
