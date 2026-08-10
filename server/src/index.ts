@@ -8,6 +8,7 @@ import { parseClientMessage } from './validation'
 import { issueToken, verifyToken, newPlayerId } from './identity'
 import { openapiSpec, swaggerUiHtml } from './openapi'
 import { logger } from './logger'
+import { randomId, randomToken } from './random'
 
 const IS_DEV = process.env.NODE_ENV !== 'production'
 import { Room } from './room'
@@ -60,7 +61,7 @@ interface Session {
   tournamentToken: string | null
 }
 
-function generateId(): string { return Math.random().toString(36).slice(2, 10) }
+function generateId(): string { return randomId(9) }
 
 function cors(): Record<string, string> {
   return {
@@ -867,7 +868,7 @@ const server = Bun.serve<Session>({
           if (!activeTournament) { emit({ type: 'tournament_error', message: 'Nenhum torneio disponível.' }); break }
           if (activeTournament.status !== 'registering') { emit({ type: 'tournament_error', message: 'Inscrições encerradas.' }); break }
           if (activeTournament.isRegistered(session.playerId)) break
-          const token = generateId() + generateId()
+          const token = randomToken(24)
           activeTournament.register(session.playerId, session.name, emit, token)
           session.tournamentToken = token
           setPersistentToken(session.playerId, token)

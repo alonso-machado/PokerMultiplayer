@@ -4,6 +4,7 @@ import type {
 } from '../../shared/types'
 import { startingChipsFor } from '../../shared/types'
 import { Room, type SendFn } from './room'
+import { randomId } from './random'
 
 const FINAL_TABLE_THRESHOLD = 8
 const MAX_PER_TABLE         = 6
@@ -366,4 +367,4 @@ export class Tournament {
   }
 }
 
-function generateId(): string { return Math.random().toString(36).slice(2, 10) }
+function generateId(): string { return randomId(9) }

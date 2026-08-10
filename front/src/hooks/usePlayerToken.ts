@@ -5,7 +5,9 @@ const DAYS = 365
 
 function setCookie(name: string, value: string, days: number): void {
   const exp = new Date(Date.now() + days * 864e5).toUTCString()
-  document.cookie = `${name}=${encodeURIComponent(value)}; expires=${exp}; path=/; SameSite=Lax`
+  // Secure is skipped on plain-http (local dev) — browsers reject "Secure" cookies over http.
+  const secure = location.protocol === 'https:' ? '; Secure' : ''
+  document.cookie = `${name}=${encodeURIComponent(value)}; expires=${exp}; path=/; SameSite=Lax${secure}`
 }
 
 function getCookie(name: string): string | null {
