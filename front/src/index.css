@@ -814,5 +814,31 @@ input:focus { border-color: var(--gold); }
 /* ── Push Your Luck Draw (reuses the .truco-table shell) ───────────────────── */
 .pyl-player-badge { cursor: default; display: flex; flex-direction: column; gap: 0.25rem; align-items: center; }
 .pyl-busted { opacity: 0.55; }
-.pyl-mini-hand { display: flex; flex-wrap: wrap; gap: 2px; justify-content: center; max-width: 220px; }
+.pyl-mini-hand { display: flex; flex-wrap: wrap; gap: 2px; justify-content: center; max-width: 220px; align-items: center; }
 .pyl-ace-wrap { filter: drop-shadow(0 0 4px rgba(201,168,76,0.85)); border-radius: 6px; }
+/* Banked Joker saves sit beside the round hand, set off by a divider so they
+   don't read as at-risk cards. */
+.pyl-saves-group { display: flex; gap: 2px; padding-left: 0.4rem; margin-left: 0.2rem; border-left: 2px dashed rgba(224,168,0,0.5); }
+.truco-hand .pyl-saves-group { gap: 0.4rem; }
+
+/* Side-by-side: main table content + a vertical ranking strip next to the monte. */
+.pyl-table-layout { display: flex; gap: 0.8rem; align-items: flex-start; }
+.pyl-table-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.9rem; }
+
+.pyl-scoreboard { flex-shrink: 0; width: 132px; display: flex; flex-direction: column; gap: 0.35rem; }
+.pyl-scoreboard-title { font-size: 0.78rem; font-weight: 700; color: var(--gold-light); text-align: center; margin-bottom: 0.1rem; }
+.pyl-scoreboard-entry { display: flex; justify-content: space-between; align-items: center; gap: 0.4rem; background: #1a2e1f; border: 1px solid var(--border); border-radius: 8px; padding: 0.35rem 0.6rem; font-size: 0.8rem; }
+.pyl-scoreboard-entry.leader { border-color: var(--gold); box-shadow: 0 0 8px rgba(201,168,76,0.4); }
+.pyl-scoreboard-name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pyl-scoreboard-score { color: var(--gold-light); font-weight: 700; flex-shrink: 0; }
+
+@media (max-width: 640px) {
+  .pyl-table-layout { flex-direction: column; }
+  .pyl-scoreboard { width: 100%; flex-direction: row; flex-wrap: wrap; justify-content: center; }
+  .pyl-scoreboard-title { width: 100%; }
+}
+
+.pyl-bust-panel { text-align: center; background: rgba(192,57,43,0.12); border: 1px solid rgba(192,57,43,0.4); border-radius: 10px; padding: 0.6rem 0.8rem; margin: 0 auto; max-width: 95%; }
+.pyl-bust-title { font-size: 0.82rem; font-weight: 700; color: #e07070; margin-bottom: 0.4rem; }
+.pyl-bust-cards { display: flex; flex-wrap: wrap; gap: 0.3rem; justify-content: center; }
+.pyl-bust-highlight { filter: drop-shadow(0 0 6px rgba(192,57,43,0.95)); border-radius: 6px; outline: 2px solid #e07070; }

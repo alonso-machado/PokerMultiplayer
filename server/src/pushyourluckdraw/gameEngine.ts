@@ -20,7 +20,9 @@ export type PushYourLuckDrawDrawOutcome =
   | { kind: 'drew'; card: PushYourLuckDrawCard }
   | { kind: 'joker'; card: PushYourLuckDrawCard }
   | { kind: 'saved'; card: PushYourLuckDrawCard }
-  | { kind: 'busted'; card: PushYourLuckDrawCard }
+  /** previousHand is the round hand exactly as it stood right before being
+   *  cleared — lets the UI show which card duplicated `card`. */
+  | { kind: 'busted'; card: PushYourLuckDrawCard; previousHand: PushYourLuckDrawCard[] }
   /** Monte AND discard both ran dry mid-decision — treated as an automatic
    *  stop, never a forced bust. See .claude/PushYourLuckDraw.md → "Esgotamento do Monte". */
   | { kind: 'forced_stop' }
@@ -145,15 +147,20 @@ export class PushYourLuckDrawGame {
         return { kind: 'saved', card }
       }
       // Bust — the whole round hand, plus the card that busted it, is lost to the discard.
-      this.descarte.push(...p.roundHand, card)
+      const previousHand = p.roundHand
+      this.descarte.push(...previousHand, card)
       p.roundHand = []
       p.roundScore = 0
       p.status = 'busted'
       this.afterAction()
-      return { kind: 'busted', card }
+      return { kind: 'busted', card, previousHand }
     }
 
     p.roundHand.push(card)
+    // roundScore is intentionally NOT recomputed here — it stays 0 while
+    // `active`, same as always. The live "if I stopped right now" preview is
+    // a front-end-only computation off the (already public) roundHand — see
+    // .claude/PushYourLuckDraw.md and PushYourLuckDrawTable.tsx.
     this.afterAction()
     return { kind: 'drew', card }
   }
@@ -223,7 +230,12 @@ export class PushYourLuckDrawGame {
     return true
   }
 
-  isRoundComplete(): boolean { return this.phase === 'round_complete' }
+  /** True once nobody is left to act this round — includes 'match_complete',
+   *  since `checkRoundEnd()` jumps straight there on the round that also
+   *  crosses the target score. A check for only 'round_complete' here would
+   *  make the Room skip `finishRound()` (and therefore `finishMatch()` too)
+   *  on exactly the round that wins the match — see .claude/PushYourLuckDraw.md. */
+  isRoundComplete(): boolean { return this.phase === 'round_complete' || this.phase === 'match_complete' }
   isMatchOver(): boolean { return this.phase === 'match_complete' }
 
   recordMatchWin(winnerIds: string[]): void {

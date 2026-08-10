@@ -823,7 +823,8 @@ const server = Bun.serve<Session>({
           const room = pushyourluckdrawRooms.get(msg.roomId)
           if (!room)       { emit({ type: 'pushyourluckdraw_room_error', message: 'Mesa não encontrada.' }); break }
           if (room.isFull) { emit({ type: 'pushyourluckdraw_room_error', message: 'Mesa cheia.' }); break }
-          if (room.isStarted) { emit({ type: 'pushyourluckdraw_room_error', message: 'Partida em andamento.' }); break }
+          // Family-friendly drop-in: joining mid-match (even mid-round) is allowed
+          // as long as there's a free seat — see .claude/PushYourLuckDraw.md.
           if (session.pushyourluckdrawRoomId) leavePushYourLuckDrawRoom(ws)
           room.join(session.playerId, session.name, emit)
           session.pushyourluckdrawRoomId = room.id

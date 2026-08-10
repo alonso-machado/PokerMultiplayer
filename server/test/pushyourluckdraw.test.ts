@@ -136,18 +136,30 @@ describe('draw — plain card', () => {
     const notCurrent = g.currentPlayerId() === 'a' ? 'b' : 'a'
     expect(g.draw(notCurrent)).toBeNull()
   })
-})
 
-describe('draw — duplicate rank (bust rule)', () => {
-  test('busts without a held joker: hand cleared, status busted, round score 0', () => {
+  test('roundScore stays 0 while active — the live "current hand value" preview is a front-end-only computation', () => {
     const g = makeGame(['a', 'b'])
     g.startMatch()
     const first = g.currentPlayerId()!
     const p = g.players.find((pl) => pl.id === first)!
-    p.roundHand = [numberCard('7', '7-a')]
+    setMonte(g, [numberCard('K')])
+    g.draw(first)
+    expect(p.roundScore).toBe(0)
+    expect(p.status).toBe('active')
+  })
+})
+
+describe('draw — duplicate rank (bust rule)', () => {
+  test('busts without a held joker: hand cleared, status busted, round score 0, previousHand exposed for the UI', () => {
+    const g = makeGame(['a', 'b'])
+    g.startMatch()
+    const first = g.currentPlayerId()!
+    const p = g.players.find((pl) => pl.id === first)!
+    const held = numberCard('7', '7-a')
+    p.roundHand = [held]
     setMonte(g, [numberCard('7', '7-b')])
     const outcome = g.draw(first)
-    expect(outcome).toMatchObject({ kind: 'busted' })
+    expect(outcome).toMatchObject({ kind: 'busted', previousHand: [held] })
     expect(p.roundHand).toEqual([])
     expect(p.status).toBe('busted')
     expect(p.roundScore).toBe(0)
@@ -257,6 +269,28 @@ describe('round completion', () => {
 // ─── Match end: only at a round boundary, target crossed mid-round never cuts it short ──
 
 describe('match end gating', () => {
+  test('regression: isRoundComplete() is true even on the round that also ends the match', () => {
+    // The Room only calls finishRound() (and, from there, finishMatch()) when
+    // isRoundComplete() is true. checkRoundEnd() jumps the phase straight to
+    // 'match_complete' on a match-winning round — isRoundComplete() checking
+    // only 'round_complete' would silently skip finishRound()/finishMatch()
+    // on exactly that round: no round_end, no match_end, no rematch vote ever
+    // broadcast. The match would just stop with no winner shown (this exact
+    // bug shipped once — see .claude/PushYourLuckDraw.md).
+    const g = makeGame(['a', 'b'], { targetScore: 150 })
+    g.startMatch()
+    const a = g.players.find((p) => p.id === 'a')!
+    a.totalScore = 140
+    a.roundHand = [numberCard('K')]   // -> 153, crosses the target
+
+    g.stop(g.currentPlayerId()!)
+    g.stop(g.currentPlayerId()!)
+
+    expect(g.isMatchOver()).toBe(true)
+    expect(g.isRoundComplete()).toBe(true)
+    expect(g.lastMatchResult).not.toBeNull()
+  })
+
   test('reaching 145 with a target of 150 does NOT end the match — another round must be dealt', () => {
     const g = makeGame(['a', 'b'], { targetScore: 150 })
     g.startMatch()
@@ -328,6 +362,26 @@ describe('match end gating', () => {
 
     expect(g.isMatchOver()).toBe(true)
     expect(g.lastMatchResult!.winnerIds.sort()).toEqual(['a', 'b'])
+  })
+})
+
+describe('joining mid-match (family-friendly drop-in — see .claude/PushYourLuckDraw.md)', () => {
+  test('a player added mid-round stays "waiting", never blocks round completion, and gets dealt in next round', () => {
+    const g = makeGame(['a', 'b'])
+    g.startMatch()
+    g.addPlayer('c', 'C')   // joins while a/b's round is already in progress
+    expect(g.players.find((p) => p.id === 'c')!.status).toBe('waiting')
+
+    // a and b resolve the round on their own — c is never asked to act.
+    g.stop(g.currentPlayerId()!)
+    g.stop(g.currentPlayerId()!)
+    expect(g.tableState.phase).toBe('round_complete')
+    const c = g.players.find((p) => p.id === 'c')!
+    expect(c.status).toBe('waiting')
+    expect(c.totalScore).toBe(0)
+
+    g.startRound()   // next round — c is now a full participant
+    expect(c.status).toBe('active')
   })
 })
 

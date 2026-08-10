@@ -85,19 +85,52 @@ export class PushYourLuckDrawRoom {
 
   // ── Join / Leave ─────────────────────────────────────────────────────────
 
+  /** Family-friendly, drop-in-anytime table: joining is allowed whenever
+   *  there's a free seat, **even mid-match, even mid-round** — see
+   *  .claude/PushYourLuckDraw.md → "Entrar a Qualquer Momento". A newcomer's
+   *  `PushYourLuckDrawPlayer.status` starts as `'waiting'` (set by
+   *  `game.addPlayer()`), which the turn-rotation/round-completion logic
+   *  already treats as "not in this round" — they're automatically promoted
+   *  to `'active'` the moment the next round is dealt, no special-casing
+   *  needed in the engine. Leaving mid-match still dissolves the table
+   *  (unchanged — see `leave()` below), only the join side got relaxed. */
   join(id: string, name: string, send: PushYourLuckDrawSendFn): boolean {
-    if (this.isFull || this.started) return false
+    if (this.isFull) return false
     this.players.push({ id, name, send })
     this.game.addPlayer(id, name)
     send({ type: 'pushyourluckdraw_room_joined', roomId: this.id, roomName: this.name, config: this.config, yourId: id })
     this.broadcastAll({ type: 'pushyourluckdraw_player_list', players: this.game.publicPlayers() })
     this.clearExpiry()
-    if (this.players.length >= 2) setTimeout(() => this.startMatch(), AUTO_START_DELAY_MS)
-    else this.scheduleExpiry()
+
+    if (this.started) {
+      // Bring the newcomer up to speed on the match already in progress —
+      // they'll just watch (status 'waiting') until the next round deals them in.
+      send({ type: 'pushyourluckdraw_game_started' })
+      send({ type: 'pushyourluckdraw_state_update', players: this.game.publicPlayers(), tableState: this.game.tableState })
+      // Joined during the post-match rematch-vote window — replay the match
+      // result and current vote tally so they can see who won and vote too.
+      if (this.game.tableState.phase === 'match_complete' && this.game.lastMatchResult) {
+        send({
+          type: 'pushyourluckdraw_match_end', players: this.game.publicPlayers(),
+          winnerIds: this.game.lastMatchResult.winnerIds, matchWins: this.game.matchWinsById(),
+        })
+        send({
+          type: 'pushyourluckdraw_rematch_status', accepted: [...this.rematchVotes],
+          pending: this.players.map((p) => p.id).filter((pid) => !this.rematchVotes.has(pid)),
+        })
+      }
+    } else if (this.players.length >= 2) {
+      setTimeout(() => this.startMatch(), AUTO_START_DELAY_MS)
+    } else {
+      this.scheduleExpiry()
+    }
     return true
   }
 
-  /** No mid-match backfill — a player leaving a running match dissolves the table. */
+  /** Leaving mid-match still dissolves the table — joining got relaxed
+   *  above, but a departure mid-round has no clean "pause and wait" state
+   *  to fall back to (their round hand, turn order, etc. would all need
+   *  resolving), so it stays out of scope. */
   leave(playerId: string, reason: LeaveReason = 'leave'): void {
     const wasPresent = this.players.some((p) => p.id === playerId)
     if (!wasPresent) return
@@ -152,6 +185,7 @@ export class PushYourLuckDrawRoom {
     this.broadcastAll({
       type: 'pushyourluckdraw_draw_result', playerId: pid, outcome: outcome.kind,
       card: outcome.kind === 'forced_stop' ? null : outcome.card,
+      bustedHand: outcome.kind === 'busted' ? outcome.previousHand : null,
       players: this.game.publicPlayers(), tableState: this.game.tableState,
     })
 

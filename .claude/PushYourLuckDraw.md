@@ -255,14 +255,29 @@ desconexão com um estouro que o jogador não escolheu).
 
 ---
 
+## Entrar a Qualquer Momento
+
+Mesa **family-friendly, "chega quando quiser"**: dá pra entrar numa mesa
+**a qualquer momento**, mesmo com a partida em andamento, mesmo no meio de
+uma rodada — a única trava é **ter vaga** (`maxPlayers` configurado na
+criação). Diferente do Go Fish/Truco/Canastra, aqui **não existe** bloqueio
+de "partida em andamento" ao entrar.
+
+- Quem entra no meio de uma rodada fica com status **`waiting`** — só
+  observa aquela rodada (não é chamado pra jogar, não pode travar o fim da
+  rodada dos outros) e entra como jogador **ativo normal a partir da
+  próxima rodada**, já com assento e placar zerado.
+- Quem entra durante a janela de votação de revanche (depois de um
+  `match_complete`) recebe o resultado da partida que terminou e a
+  contagem de votos até então, podendo votar normalmente — inclusive numa
+  partida que ele não jogou.
+
 ## Sair da Mesa
 
-Sair no meio de uma rodada com mão em aberto **perde a pontuação daquela
-rodada** (tratado como se tivesse parado com 0, não conta pro placar
-acumulado — mas o placar acumulado de rodadas **anteriores** permanece
-registrado até ele sair de fato da mesa). Sair antes de qualquer carta
-comprada na rodada atual não perde nada, já que não havia pontuação em
-aberto.
+Sair no meio de uma partida em andamento **dissolve a mesa pra todo mundo**
+(mesmo padrão do Go Fish/Truco/Canastra) — não há uma forma parcial de
+"pausar e continuar sem aquele jogador" ainda. Sair antes da partida
+começar apenas libera o assento normalmente.
 
 ---
 

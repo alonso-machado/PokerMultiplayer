@@ -143,6 +143,10 @@ de partida repete **várias rodadas até alguém atingir a pontuação-alvo**
 (como o Truco: `round_end`/`match_end` + votação de revanche), diferente do
 Go Fish (uma partida = um jogo só até o fim). Todas as mãos da rodada são
 **públicas** — não há mensagem de mão privada, único jogo do catálogo assim.
+**Único jogo do catálogo que aceita entrada a qualquer momento** — inclusive
+com a partida em andamento/no meio de uma rodada (mesa "family-friendly",
+só a lotação bloqueia); quem entra assim fica `waiting` até a próxima
+rodada. Sair em andamento continua dissolvendo a mesa, como nos outros.
 
 - `pushyourluckdraw/deck.ts` — baralho próprio de 95 cartas: cópias(rank) =
   valor(rank) para todo rank numerado/de figura (o 7 tem 7 cópias, o K tem

@@ -838,7 +838,8 @@ export interface PushYourLuckDrawPlayer {
   status: PushYourLuckDrawPlayerStatus
   roundHand: PushYourLuckDrawCard[]   // fully public — see .claude/PushYourLuckDraw.md
   savesHeld: number                   // Jokers banked this round
-  roundScore: number                  // locked once stood/busted, 0 while still active
+  roundScore: number                  // locked once stood/busted, 0 while still active — the front-end
+                                       // computes its own live "if I stopped now" preview off roundHand
   totalScore: number                  // cumulative across the match
 }
 
@@ -880,12 +881,15 @@ export type PushYourLuckDrawServerMessage =
   /** Private — sent only to the player whose turn it is */
   | { type: 'pushyourluckdraw_your_turn'; timeoutSeconds: number }
   /** Broadcast — result of a draw. card is null only for 'forced_stop' (monte and discard both
-   *  exhausted mid-decision — see .claude/PushYourLuckDraw.md → "Esgotamento do Monte"). */
+   *  exhausted mid-decision — see .claude/PushYourLuckDraw.md → "Esgotamento do Monte"). On a
+   *  'busted' outcome, bustedHand is the round hand exactly as it stood right before it was
+   *  cleared (so the client can show the player which card duplicated `card`) — null otherwise. */
   | {
       type: 'pushyourluckdraw_draw_result'
       playerId: string
       outcome: 'drew' | 'joker' | 'saved' | 'busted' | 'forced_stop'
       card: PushYourLuckDrawCard | null
+      bustedHand: PushYourLuckDrawCard[] | null
       players: PushYourLuckDrawPlayer[]
       tableState: PushYourLuckDrawTableState
     }

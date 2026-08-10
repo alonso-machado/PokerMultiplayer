@@ -51,8 +51,10 @@ export function PushYourLuckDrawLobby({ rooms, onCreateRoom, onJoinRoom }: Props
                   <span className="player-count">{room.playerCount}/{room.maxPlayers}</span>
                 </div>
               </div>
-              <button type="button" className="btn-join" onClick={() => onJoinRoom(room.id)} disabled={full || playing}>
-                {full ? 'Cheia' : playing ? 'Em jogo' : 'Entrar na Mesa'}
+              {/* Family-friendly drop-in: entra a qualquer momento enquanto houver vaga,
+                  mesmo com a partida em andamento — só a lotação bloqueia. */}
+              <button type="button" className="btn-join" onClick={() => onJoinRoom(room.id)} disabled={full}>
+                {full ? 'Cheia' : playing ? 'Entrar (em jogo)' : 'Entrar na Mesa'}
               </button>
             </div>
           )

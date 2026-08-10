@@ -15,6 +15,9 @@ export interface PushYourLuckDrawDrawEvent {
   playerId: string
   outcome: 'drew' | 'joker' | 'saved' | 'busted' | 'forced_stop'
   card: PushYourLuckDrawCard | null
+  /** Only set on a 'busted' outcome — the round hand right before it was cleared,
+   *  so the table can show which card duplicated `card`. */
+  bustedHand: PushYourLuckDrawCard[] | null
 }
 export interface PushYourLuckDrawStopEvent {
   key: number
@@ -75,7 +78,7 @@ function reducer(state: PushYourLuckDrawGameState, msg: ServerMessage): PushYour
     case 'pushyourluckdraw_draw_result':
       return {
         ...state, players: msg.players, tableState: msg.tableState, myTurn: false, turnDeadline: null,
-        lastDraw: { key: ++eventSeq, playerId: msg.playerId, outcome: msg.outcome, card: msg.card },
+        lastDraw: { key: ++eventSeq, playerId: msg.playerId, outcome: msg.outcome, card: msg.card, bustedHand: msg.bustedHand },
       }
     case 'pushyourluckdraw_stop_result':
       return {
