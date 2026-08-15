@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { PushYourLuckDrawDeckMode, PushYourLuckDrawRoomConfig, PushYourLuckDrawRoomSummary } from '../../../shared/types'
+import type { PushYourLuckDrawJokerMode, PushYourLuckDrawRoomConfig, PushYourLuckDrawRoomSummary } from '../../../shared/types'
 
 interface Props {
   rooms: PushYourLuckDrawRoomSummary[]
@@ -9,17 +9,21 @@ interface Props {
 
 const PLAYER_COUNTS = [2, 3, 4, 5, 6, 7, 8] as const
 const DEFAULT_TARGET_SCORE = 150
+const DEFAULT_JOKER_MODE: PushYourLuckDrawJokerMode = 'per_player'
+// Mirrors server/src/pushyourluckdraw/deck.ts's FIXED_JOKER_COUNT/JOKERS_PER_PLAYER — display copy only.
+const FIXED_JOKER_COUNT = 6
+const JOKERS_PER_PLAYER = 3
 
 export function PushYourLuckDrawLobby({ rooms, onCreateRoom, onJoinRoom }: Props) {
   const [showCreate, setShowCreate] = useState(false)
   const [roomName, setRoomName]     = useState('')
   const [maxPlayers, setMaxPlayers] = useState(4)
   const [targetScore, setTargetScore] = useState(DEFAULT_TARGET_SCORE)
-  const [deckMode, setDeckMode]     = useState<PushYourLuckDrawDeckMode>('fresh')
+  const [jokerMode, setJokerMode]   = useState<PushYourLuckDrawJokerMode>(DEFAULT_JOKER_MODE)
 
   function handleCreate() {
-    onCreateRoom(roomName.trim() || 'Mesa', { maxPlayers, targetScore, deckMode })
-    setShowCreate(false); setRoomName(''); setMaxPlayers(4); setTargetScore(DEFAULT_TARGET_SCORE); setDeckMode('fresh')
+    onCreateRoom(roomName.trim() || 'Mesa', { maxPlayers, targetScore, jokerMode })
+    setShowCreate(false); setRoomName(''); setMaxPlayers(4); setTargetScore(DEFAULT_TARGET_SCORE); setJokerMode(DEFAULT_JOKER_MODE)
   }
 
   return (
@@ -42,7 +46,7 @@ export function PushYourLuckDrawLobby({ rooms, onCreateRoom, onJoinRoom }: Props
                   <span>👤 {room.creatorName}</span>
                   <span>até {room.config.maxPlayers} jogadores</span>
                   <span>alvo {room.config.targetScore} pts</span>
-                  <span>{room.config.deckMode === 'fresh' ? 'baralho fresco' : 'baralho persistente'}</span>
+                  <span>{room.config.jokerMode === 'fixed' ? `${FIXED_JOKER_COUNT} Coringas fixos` : `${JOKERS_PER_PLAYER} Coringas/jogador`}</span>
                 </div>
                 <div className="room-card-players">
                   <span className={`room-status ${playing ? 'playing' : 'waiting'}`}>
@@ -107,27 +111,27 @@ export function PushYourLuckDrawLobby({ rooms, onCreateRoom, onJoinRoom }: Props
             </div>
 
             <div className="field">
-              <label>Modo de baralho</label>
+              <label>Coringas</label>
               <div className="option-row">
                 <button
                   type="button"
-                  className={`option-btn${deckMode === 'fresh' ? ' active' : ''}`}
-                  onClick={() => setDeckMode('fresh')}
+                  className={`option-btn${jokerMode === 'per_player' ? ' active' : ''}`}
+                  onClick={() => setJokerMode('per_player')}
                 >
-                  Fresco
+                  {JOKERS_PER_PLAYER} por jogador
                 </button>
                 <button
                   type="button"
-                  className={`option-btn${deckMode === 'persistent' ? ' active' : ''}`}
-                  onClick={() => setDeckMode('persistent')}
+                  className={`option-btn${jokerMode === 'fixed' ? ' active' : ''}`}
+                  onClick={() => setJokerMode('fixed')}
                 >
-                  Persistente
+                  {FIXED_JOKER_COUNT} fixos
                 </button>
               </div>
               <span className="hint">
-                {deckMode === 'fresh'
-                  ? 'Cada rodada embaralha as 95 cartas do zero.'
-                  : 'O monte continua de onde parou entre rodadas — só reembaralha quando esgotar.'}
+                {jokerMode === 'per_player'
+                  ? `A mesa sempre tem ${JOKERS_PER_PLAYER} Coringas por jogador sentado — entrar ou sair da partida ajusta o monte na hora.`
+                  : `A mesa sempre tem ${FIXED_JOKER_COUNT} Coringas, não importa quantos jogadores entrem ou saiam.`}
               </span>
             </div>
 

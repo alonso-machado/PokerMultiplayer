@@ -136,8 +136,6 @@ export type ClientMessage =
   | CanastraClientMessage
   // Blackjack / 21 (see below)
   | BlackjackClientMessage
-  // Go Fish (see below)
-  | GoFishClientMessage
   // Push Your Luck Draw (see below)
   | PushYourLuckDrawClientMessage
 
@@ -200,8 +198,6 @@ export type ServerMessage =
   | CanastraServerMessage
   // ── Blackjack / 21 (see below) ────────────────────────────────────────────
   | BlackjackServerMessage
-  // ── Go Fish (see below) ───────────────────────────────────────────────────
-  | GoFishServerMessage
   // ── Push Your Luck Draw (see below) ───────────────────────────────────────
   | PushYourLuckDrawServerMessage
 
@@ -701,94 +697,6 @@ export type BlackjackServerMessage =
    *  now, so the lobby can show activity without a full room list to browse. */
   | { type: 'blackjack_lobby_stats'; tableCount: number; playerCount: number }
 
-// ─── Go Fish ────────────────────────────────────────────────────────────────
-// See .claude/GoFish.md for the full rules this section's types model.
-// Rules source: https://bicyclecards.com/how-to-play/go-fish — the only
-// ruleset used for this game (same policy as Blackjack.md — no house
-// variants consulted). Reuses the plain `Card`/`Rank` types above (single
-// 52-card deck, no duplicates, unlike Canastra's double deck) — no separate
-// card shape needed. Architecturally closest to Canastra: free room
-// creation, one "match" = one game played to completion, then a rematch
-// vote — but no teams, and a variable 2-6 player count instead of a fixed
-// 1x1/2x2 mode.
-
-export interface GoFishRoomConfig {
-  maxPlayers: number   // 2–6
-}
-
-export interface GoFishRoomSummary {
-  id: string
-  name: string
-  creatorName: string
-  playerCount: number
-  maxPlayers: number
-  status: RoomStatus
-  config: GoFishRoomConfig
-}
-
-/** 'out' = ran out of cards while the stock was also empty — skipped in turn
- *  rotation for the rest of the round (see .claude/GoFish.md). */
-export type GoFishPlayerStatus = 'waiting' | 'active' | 'out' | 'disconnected'
-
-export interface GoFishPlayer {
-  id: string
-  name: string
-  status: GoFishPlayerStatus
-  handCount: number      // card count only — actual cards are private
-  books: Rank[]          // ranks this player has already completed a book of
-}
-
-export type GoFishPhase = 'waiting' | 'playing' | 'round_end'
-
-export interface GoFishTableState {
-  phase: GoFishPhase
-  stockCount: number
-  turnPlayerId: string | null
-}
-
-// ─── WebSocket: Client → Server (Go Fish) ──────────────────────────────────
-
-export type GoFishClientMessage =
-  | { type: 'gofish_list_rooms' }
-  | { type: 'gofish_create_room'; roomName: string; config: GoFishRoomConfig }
-  | { type: 'gofish_join_room'; roomId: string }
-  | { type: 'gofish_leave_room' }
-  | { type: 'gofish_start_game' }   // manual fallback — mirrors the lobby's start_game
-  | { type: 'gofish_ask'; targetPlayerId: string; rank: Rank }
-  | { type: 'gofish_rematch_vote'; accept: boolean }
-
-// ─── WebSocket: Server → Client (Go Fish) ──────────────────────────────────
-
-export type GoFishServerMessage =
-  | { type: 'gofish_room_list'; rooms: GoFishRoomSummary[] }
-  | { type: 'gofish_room_joined'; roomId: string; roomName: string; config: GoFishRoomConfig; yourId: string }
-  | { type: 'gofish_room_left'; reason?: 'manual' | 'expired' | 'abandoned' | 'rematch_declined' }
-  | { type: 'gofish_room_error'; message: string }
-  | { type: 'gofish_player_list'; players: GoFishPlayer[] }
-  | { type: 'gofish_game_started' }
-  /** Private — sent only to the receiving player at the start of the round */
-  | { type: 'gofish_hand_dealt'; yourCards: Card[]; players: GoFishPlayer[]; tableState: GoFishTableState }
-  /** Private — sent only to the player(s) whose hand changed by an action */
-  | { type: 'gofish_hand_update'; cards: Card[] }
-  /** Broadcast — public table state changed (turn advanced, stock drawn, book completed) */
-  | { type: 'gofish_state_update'; players: GoFishPlayer[]; tableState: GoFishTableState }
-  /** Broadcast — narrates the outcome of an ask without leaking anyone's hand contents.
-   *  drawnMatch = true when a "go fish" stock draw happened to match the asked rank
-   *  (counts as a catch — see .claude/GoFish.md → gap #1). */
-  | {
-      type: 'gofish_ask_result'
-      askerId: string; targetId: string; rank: Rank
-      cardsTransferred: number; wentFish: boolean; drawnMatch: boolean
-      booksCompleted: { playerId: string; rank: Rank }[]
-    }
-  /** Private — sent to the player whose turn it is; ranks they're allowed to ask for
-   *  (must hold at least one card of that rank — see .claude/GoFish.md). */
-  | { type: 'gofish_your_turn'; askableRanks: Rank[]; timeoutSeconds: number }
-  /** Broadcast — the round (= the whole match) ended, via 13 books or too few players left to continue */
-  | { type: 'gofish_round_end'; players: GoFishPlayer[]; tableState: GoFishTableState; winnerIds: string[]; matchWins: Record<string, number> }
-  /** Broadcast — rematch vote progress */
-  | { type: 'gofish_rematch_status'; accepted: string[]; pending: string[] }
-
 // ─── Push Your Luck Draw ────────────────────────────────────────────────────
 // See .claude/PushYourLuckDraw.md for the full rules this section's types
 // model. Original ruleset (not adapted from a published game) — push-your-luck
@@ -796,26 +704,36 @@ export type GoFishServerMessage =
 // Joker "save" and an Ace of Spades ×2 multiplier. Uses its own card shape
 // (same pattern as CanastraCard) because the deck isn't a standard 52: copy
 // count per rank equals the rank's value (the 7 has 7 copies, the K has 13),
-// plus 4 Jokers — 95 cards total, no relation to a physical 52-card pack.
-// Architecturally closest to Go Fish for room/lobby joining (free 2-8, no
-// fixed team size, auto-starts 300ms after the 2nd join) crossed with Truco's
-// "several hands/rounds until a target score, then a rematch vote" match loop
-// (unlike Go Fish's "one game played to completion"). All hands are public —
-// no private per-player card messages needed, unlike every other game here.
-
-export type PushYourLuckDrawDeckMode = 'fresh' | 'persistent'
+// plus a configurable number of Jokers — either a flat FIXED_JOKER_COUNT
+// (6), or JOKERS_PER_PLAYER (3) per seated player rescaled live as players
+// join/leave mid-match, picked per table via `jokerMode` — see "Baralho" in
+// the doc. Free 2-8 room/lobby joining, auto-starts 300ms after the 2nd join,
+// crossed with Truco's "several hands/rounds until a target score, then a
+// rematch vote" match loop. All hands are public — no private per-player
+// card messages needed, unlike every other game here. Single deck mode: the
+// monte is dealt once per match and only reshuffled from the accumulated
+// discard when it runs dry (no more fresh-per-round option — see "Baralho").
 
 export interface PushYourLuckDrawCard {
-  id: string          // unique per physical card — many ranks have duplicate copies
-  suit: Suit | null    // null when isJoker; the Ace of Spades is suit:'spades', rank:'A' (only 1 in the whole deck)
-  rank: Rank | null    // null when isJoker
+  id: string           // unique per physical card — many ranks have duplicate copies
+  suit: Suit | null     // null when isJoker/isHalf; the Ace of Spades is suit:'spades', rank:'A' (only 1 in the whole deck)
+  rank: Rank | null     // null when isJoker/isHalf
   isJoker: boolean
+  /** The '@' halving marker thrown by another player's spare Joker — see
+   *  "Coringa" in the doc. Never dealt from the monte; synthesized only by
+   *  a throw_joker action, so it's mutually exclusive with isJoker. */
+  isHalf: boolean
 }
+
+/** 'fixed' = always FIXED_JOKER_COUNT (6) Jokers, never rescaled by
+ *  join/leave. 'per_player' = JOKERS_PER_PLAYER (3) × seated players, live-
+ *  rescaled on join/leave — see .claude/PushYourLuckDraw.md → "Baralho". */
+export type PushYourLuckDrawJokerMode = 'fixed' | 'per_player'
 
 export interface PushYourLuckDrawRoomConfig {
   maxPlayers: number    // 2–8
   targetScore: number   // match ends once someone's total reaches this, default 150
-  deckMode: PushYourLuckDrawDeckMode
+  jokerMode: PushYourLuckDrawJokerMode
 }
 
 export interface PushYourLuckDrawRoomSummary {
@@ -837,7 +755,8 @@ export interface PushYourLuckDrawPlayer {
   name: string
   status: PushYourLuckDrawPlayerStatus
   roundHand: PushYourLuckDrawCard[]   // fully public — see .claude/PushYourLuckDraw.md
-  savesHeld: number                   // Jokers banked this round
+  savesHeld: number                   // Jokers banked this round — the first is locked as bust protection,
+                                       // any beyond it can also be thrown at another player (see doc)
   roundScore: number                  // locked once stood/busted, 0 while still active — the front-end
                                        // computes its own live "if I stopped now" preview off roundHand
   totalScore: number                  // cumulative across the match
@@ -850,7 +769,6 @@ export interface PushYourLuckDrawTableState {
   turnPlayerId: string | null
   monteCount: number
   targetScore: number
-  deckMode: PushYourLuckDrawDeckMode
 }
 
 // ─── WebSocket: Client → Server (Push Your Luck Draw) ──────────────────────
@@ -863,6 +781,10 @@ export type PushYourLuckDrawClientMessage =
   | { type: 'pushyourluckdraw_start_game' }   // manual fallback — mirrors the lobby's start_game
   | { type: 'pushyourluckdraw_draw' }
   | { type: 'pushyourluckdraw_stop' }
+  /** Turn action — spends 1 spare Joker (savesHeld must be ≥2, one always
+   *  stays in reserve) to drop an '@' halving card into targetId's round
+   *  hand. Consumes the turn like draw/stop. See .claude/PushYourLuckDraw.md. */
+  | { type: 'pushyourluckdraw_throw_joker'; targetId: string }
   | { type: 'pushyourluckdraw_rematch_vote'; accept: boolean }
 
 // ─── WebSocket: Server → Client (Push Your Luck Draw) ──────────────────────
@@ -870,11 +792,11 @@ export type PushYourLuckDrawClientMessage =
 export type PushYourLuckDrawServerMessage =
   | { type: 'pushyourluckdraw_room_list'; rooms: PushYourLuckDrawRoomSummary[] }
   | { type: 'pushyourluckdraw_room_joined'; roomId: string; roomName: string; config: PushYourLuckDrawRoomConfig; yourId: string }
-  | { type: 'pushyourluckdraw_room_left'; reason?: 'manual' | 'expired' | 'abandoned' | 'rematch_declined' }
+  | { type: 'pushyourluckdraw_room_left'; reason?: 'manual' | 'expired' | 'rematch_declined' }
   | { type: 'pushyourluckdraw_room_error'; message: string }
   | { type: 'pushyourluckdraw_player_list'; players: PushYourLuckDrawPlayer[] }
   | { type: 'pushyourluckdraw_game_started' }
-  /** Broadcast — a new round was dealt (fresh or continuing monte, per deckMode) */
+  /** Broadcast — a new round was dealt (continuing the match's monte — see "Baralho") */
   | { type: 'pushyourluckdraw_round_started'; players: PushYourLuckDrawPlayer[]; tableState: PushYourLuckDrawTableState }
   /** Broadcast — public table/player sync outside of a specific draw/stop (e.g. on reconnect) */
   | { type: 'pushyourluckdraw_state_update'; players: PushYourLuckDrawPlayer[]; tableState: PushYourLuckDrawTableState }
@@ -895,6 +817,8 @@ export type PushYourLuckDrawServerMessage =
     }
   /** Broadcast — a player chose to stop, locking in their round score */
   | { type: 'pushyourluckdraw_stop_result'; playerId: string; roundScore: number; players: PushYourLuckDrawPlayer[]; tableState: PushYourLuckDrawTableState }
+  /** Broadcast — a player threw a spare Joker at targetId, dropping an '@' into their round hand */
+  | { type: 'pushyourluckdraw_throw_result'; playerId: string; targetId: string; players: PushYourLuckDrawPlayer[]; tableState: PushYourLuckDrawTableState }
   /** Broadcast — round ended (everyone stood or busted); totals updated */
   | { type: 'pushyourluckdraw_round_end'; players: PushYourLuckDrawPlayer[]; tableState: PushYourLuckDrawTableState }
   /** Broadcast — match ended (someone's total reached the target score) */

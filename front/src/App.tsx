@@ -10,7 +10,6 @@ import { useTrucoGame } from './hooks/useTrucoGame'
 import { useGauchoGame } from './hooks/useGauchoGame'
 import { useCanastraGame } from './hooks/useCanastraGame'
 import { useBlackjackGame } from './hooks/useBlackjackGame'
-import { useGoFishGame } from './hooks/useGoFishGame'
 import { usePushYourLuckDrawGame } from './hooks/usePushYourLuckDrawGame'
 import { getOrCreateIdentity, saveName, saveIdentityToken, saveTournamentToken, clearTournamentToken } from './hooks/usePlayerToken'
 import { Lobby } from './components/Lobby'
@@ -24,17 +23,15 @@ import { CanastraLobby } from './components/CanastraLobby'
 import { CanastraTable } from './components/CanastraTable'
 import { BlackjackLobby } from './components/BlackjackLobby'
 import { BlackjackTable } from './components/BlackjackTable'
-import { GoFishLobby } from './components/GoFishLobby'
-import { GoFishTable } from './components/GoFishTable'
 import { PushYourLuckDrawLobby } from './components/PushYourLuckDrawLobby'
 import { PushYourLuckDrawTable } from './components/PushYourLuckDrawTable'
 import { HandGuide } from './components/HandGuide'
 import { AdminPage } from './pages/AdminPage'
-import type { TrucoRoomSummary, GauchoRoomSummary, CanastraRoomSummary, GoFishRoomSummary, PushYourLuckDrawRoomSummary } from '../../shared/types'
+import type { TrucoRoomSummary, GauchoRoomSummary, CanastraRoomSummary, PushYourLuckDrawRoomSummary } from '../../shared/types'
 
 interface TurnState { validActions: PlayerAction[]; callAmount: number; minRaise: number }
 interface ShowdownEntry { playerId: string; playerName: string; cards: Card[]; bestCards: Card[]; handName: string; won: number }
-type GameGroup = 'poker' | 'truco' | 'gaucho' | 'canastra' | 'blackjack' | 'gofish' | 'pushyourluckdraw'
+type GameGroup = 'poker' | 'truco' | 'gaucho' | 'canastra' | 'blackjack' | 'pushyourluckdraw'
 type PokerTab = 'rooms' | 'tournament'
 
 const identity = getOrCreateIdentity()
@@ -61,8 +58,6 @@ function AppInner() {
   const { canastraState, handleCanastraMessage } = useCanastraGame(identity.playerId)
   const { blackjackState, handleBlackjackMessage } = useBlackjackGame(identity.playerId)
   const [blackjackStats, setBlackjackStats] = useState({ tableCount: 0, playerCount: 0 })
-  const [gofishRooms, setGofishRooms] = useState<GoFishRoomSummary[]>([])
-  const { gofishState, handleGoFishMessage } = useGoFishGame(identity.playerId)
   const [pushYourLuckDrawRooms, setPushYourLuckDrawRooms] = useState<PushYourLuckDrawRoomSummary[]>([])
   const { pushYourLuckDrawState, handlePushYourLuckDrawMessage } = usePushYourLuckDrawGame(identity.playerId)
 
@@ -106,7 +101,6 @@ function AppInner() {
       case 'gaucho_room_list': setGauchoRooms(msg.rooms); break
       case 'canastra_room_list': setCanastraRooms(msg.rooms); break
       case 'blackjack_lobby_stats': setBlackjackStats({ tableCount: msg.tableCount, playerCount: msg.playerCount }); break
-      case 'gofish_room_list': setGofishRooms(msg.rooms); break
       case 'pushyourluckdraw_room_list': setPushYourLuckDrawRooms(msg.rooms); break
       case 'tournament_info':
         // A brand-new tournament (different id) means our previous registration
@@ -230,11 +224,10 @@ function AppInner() {
         else if (msg.type.startsWith('gaucho_')) handleGauchoMessage(msg)
         else if (msg.type.startsWith('canastra_')) handleCanastraMessage(msg)
         else if (msg.type.startsWith('blackjack_')) handleBlackjackMessage(msg)
-        else if (msg.type.startsWith('gofish_')) handleGoFishMessage(msg)
         else if (msg.type.startsWith('pushyourluckdraw_')) handlePushYourLuckDrawMessage(msg)
         break
     }
-  }, [posthog?.capture, handleTrucoMessage, handleGauchoMessage, handleCanastraMessage, handleBlackjackMessage, handleGoFishMessage, handlePushYourLuckDrawMessage])
+  }, [posthog?.capture, handleTrucoMessage, handleGauchoMessage, handleCanastraMessage, handleBlackjackMessage, handlePushYourLuckDrawMessage])
 
   const { send } = useSocket(identity, handleMessage)
 
@@ -290,6 +283,7 @@ function AppInner() {
         turnDeadline={pushYourLuckDrawState.turnDeadline}
         lastDraw={pushYourLuckDrawState.lastDraw}
         lastStop={pushYourLuckDrawState.lastStop}
+        lastThrow={pushYourLuckDrawState.lastThrow}
         roundEnd={pushYourLuckDrawState.roundEnd}
         matchEnd={pushYourLuckDrawState.matchEnd}
         rematch={pushYourLuckDrawState.rematch}
@@ -297,30 +291,8 @@ function AppInner() {
         onStartGame={() => send({ type: 'pushyourluckdraw_start_game' })}
         onDraw={() => send({ type: 'pushyourluckdraw_draw' })}
         onStop={() => send({ type: 'pushyourluckdraw_stop' })}
+        onThrowJoker={(targetId) => send({ type: 'pushyourluckdraw_throw_joker', targetId })}
         onRematchVote={(accept) => send({ type: 'pushyourluckdraw_rematch_vote', accept })}
-      />
-    )
-  }
-
-  if (gofishState.roomId && gofishState.config) {
-    return (
-      <GoFishTable
-        myId={gofishState.myId}
-        roomName={gofishState.roomName}
-        config={gofishState.config}
-        players={gofishState.players}
-        tableState={gofishState.tableState}
-        myCards={gofishState.myCards}
-        isStarted={gofishState.isStarted}
-        turnDeadline={gofishState.turnDeadline}
-        askableRanks={gofishState.turn?.askableRanks ?? []}
-        lastAsk={gofishState.lastAsk}
-        roundEnd={gofishState.roundEnd}
-        rematch={gofishState.rematch}
-        onLeave={() => send({ type: 'gofish_leave_room' })}
-        onStartGame={() => send({ type: 'gofish_start_game' })}
-        onAsk={(targetPlayerId, rank) => send({ type: 'gofish_ask', targetPlayerId, rank })}
-        onRematchVote={(accept) => send({ type: 'gofish_rematch_vote', accept })}
       />
     )
   }
@@ -447,7 +419,6 @@ function AppInner() {
           : activeGame === 'gaucho' ? '🧉 Truco Gaúcho'
           : activeGame === 'canastra' ? '🎴 Canastra / Buraco'
           : activeGame === 'blackjack' ? '🂡 Blackjack / 21'
-          : activeGame === 'gofish' ? '🎣 Go Fish'
           : '🍀 Push Your Luck Draw'}
       </h1>
       <p className="subtitle">
@@ -456,7 +427,6 @@ function AppInner() {
           : activeGame === 'gaucho' ? 'Truco Gaúcho / Espanhol — com Envido e Flor'
           : activeGame === 'canastra' ? 'Canastra / Buraco multiplayer — 1x1 ou 2x2'
           : activeGame === 'blackjack' ? 'Blackjack / 21 — você contra o dealer, até 7 na mesa'
-          : activeGame === 'gofish' ? 'Go Fish multiplayer — 2 a 6 jogadores, forme os 13 baralhos'
           : 'Push Your Luck Draw — 2 a 8 jogadores, peça carta ou pare antes de estourar'}
       </p>
       <NameRow name={myName} onSave={setMyName} />
@@ -467,7 +437,6 @@ function AppInner() {
         <button type="button" className={`tab${activeGame === 'gaucho' ? ' active' : ''}`} onClick={() => setActiveGame('gaucho')}>🧉 Truco Gaúcho</button>
         <button type="button" className={`tab${activeGame === 'canastra' ? ' active' : ''}`} onClick={() => setActiveGame('canastra')}>🎴 Canastra</button>
         <button type="button" className={`tab${activeGame === 'blackjack' ? ' active' : ''}`} onClick={() => setActiveGame('blackjack')}>🂡 Blackjack / 21</button>
-        <button type="button" className={`tab${activeGame === 'gofish' ? ' active' : ''}`} onClick={() => setActiveGame('gofish')}>🎣 Go Fish</button>
         <button type="button" className={`tab${activeGame === 'pushyourluckdraw' ? ' active' : ''}`} onClick={() => setActiveGame('pushyourluckdraw')}>🍀 Push Your Luck</button>
       </div>
 
@@ -529,14 +498,6 @@ function AppInner() {
 
       {activeGame === 'blackjack' && (
         <BlackjackLobby stats={blackjackStats} onJoin={() => send({ type: 'blackjack_join' })} />
-      )}
-
-      {activeGame === 'gofish' && (
-        <GoFishLobby
-          rooms={gofishRooms}
-          onCreateRoom={(name, cfg) => send({ type: 'gofish_create_room', roomName: name, config: cfg })}
-          onJoinRoom={(id) => send({ type: 'gofish_join_room', roomId: id })}
-        />
       )}
 
       {activeGame === 'pushyourluckdraw' && (

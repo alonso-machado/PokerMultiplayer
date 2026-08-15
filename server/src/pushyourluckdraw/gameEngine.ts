@@ -2,7 +2,7 @@ import type {
   PushYourLuckDrawCard, PushYourLuckDrawPhase, PushYourLuckDrawPlayer,
   PushYourLuckDrawPlayerStatus, PushYourLuckDrawRoomConfig, PushYourLuckDrawTableState,
 } from '../../../shared/types'
-import { buildDeck, isAceOfSpades, rankPoints, shuffle } from './deck'
+import { buildDeck, isAceOfSpades, JOKERS_PER_PLAYER, rankPoints, shuffle } from './deck'
 
 interface GamePlayer {
   id: string
@@ -31,10 +31,18 @@ export interface PushYourLuckDrawMatchResult {
   winnerIds: string[]   // more than one entry only on a tie
 }
 
+/** What survives a disconnect for a possible rejoin — deliberately minimal
+ *  (just the match-level score, not the in-progress round hand/saves) — see
+ *  .claude/PushYourLuckDraw.md → "Desconexão". */
+export interface PushYourLuckDrawDisconnectSnapshot {
+  totalScore: number
+  matchWins: number
+}
+
 /** Push Your Luck Draw — several rounds per match until someone's total hits
  *  the target score (like Truco's repeated hands), with free room joining
- *  and no fixed team size (like Go Fish). See .claude/PushYourLuckDraw.md
- *  for the full rules this implements. */
+ *  and no fixed team size. See .claude/PushYourLuckDraw.md for the full
+ *  rules this implements. */
 export class PushYourLuckDrawGame {
   readonly config: PushYourLuckDrawRoomConfig
   players: GamePlayer[] = []
@@ -42,23 +50,103 @@ export class PushYourLuckDrawGame {
   private descarte: PushYourLuckDrawCard[] = []
   private phase: PushYourLuckDrawPhase = 'waiting'
   private currentSeat = 0
-  private startSeat = -1   // rotates each round, mirrors Canastra/Go Fish's dealer rotation
+  private startSeat = -1   // rotates each round, mirrors Canastra's dealer rotation
+  private halfCounter = 0  // unique id suffix for synthesized '@' halving cards
+  private extraJokerSeq = 0   // unique id suffix for Jokers added by a mid-match join
+  private matchStarted = false   // true once startMatch() has run at least once this match
   lastMatchResult: PushYourLuckDrawMatchResult | null = null
 
   constructor(config: PushYourLuckDrawRoomConfig) { this.config = config }
 
   get maxPlayers(): number { return this.config.maxPlayers }
 
+  /** Before the deck is dealt, joining is just bookkeeping — startMatch()
+   *  builds the deck from whoever is seated at that point anyway. Once the
+   *  match is underway (family-friendly drop-in — see .claude/PushYourLuckDraw.md
+   *  → "Entrar a Qualquer Momento"), a newcomer also tops up the live monte
+   *  by JOKERS_PER_PLAYER — but only in `per_player` mode. In `fixed` mode
+   *  the table always has the same FIXED_JOKER_COUNT regardless of who's
+   *  seated, so joining never touches the deck. */
   addPlayer(id: string, name: string): void {
     const seatIndex = this.players.length
     this.players.push({
       id, name, seatIndex, status: 'waiting', roundHand: [], savesHeld: 0,
       roundScore: 0, totalScore: 0, matchWins: 0,
     })
+    if (this.matchStarted && this.config.jokerMode === 'per_player') this.addJokersToDeck(JOKERS_PER_PLAYER)
   }
 
+  /** Mirrors addPlayer() — trims JOKERS_PER_PLAYER Jokers back out of
+   *  circulation on the way out (in `per_player` mode only; `fixed` mode
+   *  never rescales), but only ever from the monte/discard, never from a
+   *  still-seated player's banked `savesHeld` or an already-dealt round
+   *  hand (see removeJokersFromDeck()). */
   removePlayer(id: string): void {
     this.players = this.players.filter((p) => p.id !== id)
+    if (this.matchStarted && this.config.jokerMode === 'per_player') this.removeJokersFromDeck(JOKERS_PER_PLAYER)
+  }
+
+  /** A real disconnect (closed tab/app), not the explicit "Sair da mesa"
+   *  action — the player is removed from the table like removePlayer()
+   *  (same seat/Joker-rescale bookkeeping), but their match-level score is
+   *  handed back to the caller (the Room) to hold onto in case the same
+   *  identity rejoins later — see .claude/PushYourLuckDraw.md → "Desconexão".
+   *  If it was their turn right now, the turn is advanced so the round
+   *  isn't left waiting on someone who's gone; if removing them means
+   *  nobody's left to act, the round is closed out same as any other
+   *  action (see afterAction()/checkRoundEnd()). */
+  disconnectPlayer(id: string): PushYourLuckDrawDisconnectSnapshot | null {
+    const p = this.player(id)
+    if (!p) return null
+    const wasCurrentTurn = this.phase === 'playing' && this.isCurrent(id)
+    const snapshot: PushYourLuckDrawDisconnectSnapshot = { totalScore: p.totalScore, matchWins: p.matchWins }
+    this.removePlayer(id)
+    if (this.phase === 'playing') {
+      if (this.checkRoundEnd()) return snapshot
+      if (wasCurrentTurn) this.advanceTurn()
+    }
+    return snapshot
+  }
+
+  /** Restores a score snapshot onto a player who just rejoined after a
+   *  disconnect — addPlayer() always seats them fresh at 0, this overlays
+   *  the preserved match-level totals on top. Deliberately does not restore
+   *  roundHand/savesHeld/status — those are round-scoped and were dropped
+   *  on disconnect, same as any other family-friendly drop-in. */
+  restoreScore(id: string, snapshot: PushYourLuckDrawDisconnectSnapshot): void {
+    const p = this.player(id)
+    if (!p) return
+    p.totalScore = snapshot.totalScore
+    p.matchWins = snapshot.matchWins
+  }
+
+  /** Adds `count` fresh Jokers into the live monte, shuffled in — used when
+   *  a player joins mid-match. */
+  private addJokersToDeck(count: number): void {
+    const extra: PushYourLuckDrawCard[] = []
+    for (let i = 0; i < count; i++) {
+      extra.push({ id: `joker-extra-${this.extraJokerSeq++}`, suit: null, rank: null, isJoker: true, isHalf: false })
+    }
+    this.monte = shuffle([...this.monte, ...extra])
+  }
+
+  /** Removes up to `count` Jokers from circulation — from the undrawn monte
+   *  first, and only spills into the discard pile if the monte doesn't have
+   *  enough to cover it. Never touches a player's `savesHeld` count or the
+   *  cards already sitting in a round hand — those represent Jokers already
+   *  "spent" by a real draw, not deck inventory. */
+  private removeJokersFromDeck(count: number): void {
+    let remaining = count
+    const strip = (pile: PushYourLuckDrawCard[]): PushYourLuckDrawCard[] => {
+      const kept: PushYourLuckDrawCard[] = []
+      for (const c of pile) {
+        if (remaining > 0 && c.isJoker) { remaining--; continue }
+        kept.push(c)
+      }
+      return kept
+    }
+    this.monte = strip(this.monte)
+    if (remaining > 0) this.descarte = strip(this.descarte)
   }
 
   publicPlayers(): PushYourLuckDrawPlayer[] {
@@ -77,37 +165,33 @@ export class PushYourLuckDrawGame {
   get tableState(): PushYourLuckDrawTableState {
     return {
       phase: this.phase, turnPlayerId: this.currentPlayerId(), monteCount: this.monte.length,
-      targetScore: this.config.targetScore, deckMode: this.config.deckMode,
+      targetScore: this.config.targetScore,
     }
   }
 
   // ── Match / round lifecycle ──────────────────────────────────────────────
 
   /** Called once when the table starts, and again after every accepted
-   *  rematch — always deals a completely fresh 95-card deck regardless of
-   *  deckMode (a new match resets the shared monte either way — see
-   *  .claude/PushYourLuckDraw.md → "Modo de Baralho"). */
+   *  rematch — always deals a completely fresh deck, sized per `jokerMode`
+   *  (see .claude/PushYourLuckDraw.md → "Baralho"). A new match always
+   *  resets the shared monte, even though rounds within the match never do
+   *  (see startRound() below). */
   startMatch(): void {
+    this.matchStarted = true
     for (const p of this.players) p.totalScore = 0
-    this.monte = shuffle(buildDeck())
+    this.monte = shuffle(buildDeck(this.players.length, this.config.jokerMode))
     this.descarte = []
     this.startSeat = -1
     this.startRound()
   }
 
-  /** Deals the next round. In `persistent` mode this reuses whatever monte is
-   *  left over from the previous round instead of rebuilding it — see
-   *  .claude/PushYourLuckDraw.md → "Modo de Baralho". */
+  /** Deals the next round. The monte is never rebuilt mid-match — it just
+   *  keeps going from wherever the previous round left it, reshuffling only
+   *  once it runs dry (see reshuffleFromDiscard()). See
+   *  .claude/PushYourLuckDraw.md → "Baralho". */
   startRound(): void {
-    if (this.config.deckMode === 'persistent') {
-      for (const p of this.players) this.descarte.push(...p.roundHand)
-    }
+    for (const p of this.players) this.descarte.push(...p.roundHand)
     for (const p of this.players) { p.status = 'active'; p.roundHand = []; p.savesHeld = 0; p.roundScore = 0 }
-
-    if (this.config.deckMode === 'fresh') {
-      this.monte = shuffle(buildDeck())
-      this.descarte = []
-    }
 
     // Modulo the actual seated count, not `maxPlayers` — mirrors Go Fish gap #3.
     this.startSeat = (this.startSeat + 1) % this.players.length
@@ -174,29 +258,57 @@ export class PushYourLuckDrawGame {
     return true
   }
 
+  /** Turn action: spends 1 of the thrower's spare Jokers (the first Joker
+   *  ever held is mandatory bust protection and can never be thrown — see
+   *  .claude/PushYourLuckDraw.md → "Coringa") to drop an '@' halving marker
+   *  into targetId's round hand. Only one '@' can land on a player per
+   *  round — a second throw at an already-halved player is rejected, it
+   *  doesn't stack. Consumes the thrower's turn like draw()/stop() do,
+   *  but the thrower stays 'active' (only the turn advances). */
+  throwJoker(fromId: string, targetId: string): boolean {
+    if (this.phase !== 'playing' || !this.isCurrent(fromId)) return false
+    if (fromId === targetId) return false
+    const p = this.player(fromId)
+    const target = this.player(targetId)
+    if (!p || !target) return false
+    if (p.savesHeld < 2) return false                    // 1 Joker must always stay in reserve
+    if (target.status !== 'active') return false
+    if (target.roundHand.some((c) => c.isHalf)) return false   // no double-halving
+
+    p.savesHeld--
+    target.roundHand.push({ id: `half-${this.halfCounter++}`, suit: null, rank: null, isJoker: false, isHalf: true })
+    this.afterAction()
+    return true
+  }
+
   private resolveStop(p: GamePlayer): void {
     p.status = 'stood'
     p.roundScore = this.computeScore(p.roundHand)
   }
 
+  /** Ace of Spades doubles first, then a thrown '@' halves the result
+   *  (floored) — see .claude/PushYourLuckDraw.md → "Poder do Ás de Espadas"
+   *  and "Coringa". A hand with both nets back to the plain sum. */
   private computeScore(hand: PushYourLuckDrawCard[]): number {
     const hasAce = hand.some(isAceOfSpades)
-    const sum = hand.filter((c) => !isAceOfSpades(c)).reduce((s, c) => s + rankPoints(c.rank!), 0)
-    return hasAce ? sum * 2 : sum
+    const hasHalf = hand.some((c) => c.isHalf)
+    const sum = hand.filter((c) => !isAceOfSpades(c) && !c.isHalf).reduce((s, c) => s + rankPoints(c.rank!), 0)
+    const doubled = hasAce ? sum * 2 : sum
+    return hasHalf ? Math.floor(doubled / 2) : doubled
   }
 
-  /** Recycles the whole accumulated discard pile into a fresh monte — in
-   *  `fresh` mode that's just this round's busted cards; in `persistent`
-   *  mode it's every card discarded since the match started (see
-   *  .claude/PushYourLuckDraw.md → "Esgotamento do Monte"). */
+  /** Recycles the whole accumulated discard pile (every card discarded since
+   *  the match started, across every round — see .claude/PushYourLuckDraw.md
+   *  → "Esgotamento do Monte") into a fresh monte. */
   private reshuffleFromDiscard(): void {
     if (this.descarte.length === 0) return
     this.monte = shuffle(this.descarte)
     this.descarte = []
   }
 
-  /** Common tail for every branch of draw()/stop(): end the round once
-   *  nobody is left to act, otherwise advance to the next active seat. */
+  /** Common tail for every branch of draw()/stop()/throwJoker(): end the
+   *  round once nobody is left to act, otherwise advance to the next
+   *  active seat. */
   private afterAction(): void {
     if (this.checkRoundEnd()) return
     this.advanceTurn()
@@ -239,7 +351,7 @@ export class PushYourLuckDrawGame {
   isMatchOver(): boolean { return this.phase === 'match_complete' }
 
   recordMatchWin(winnerIds: string[]): void {
-    if (winnerIds.length !== 1) return   // ties: nobody's matchWins increments, same convention as Go Fish/Canastra
+    if (winnerIds.length !== 1) return   // ties: nobody's matchWins increments, same convention as Canastra
     const p = this.player(winnerIds[0]!)
     if (p) p.matchWins++
   }

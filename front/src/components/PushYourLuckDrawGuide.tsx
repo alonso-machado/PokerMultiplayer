@@ -26,12 +26,14 @@ export function PushYourLuckDrawGuide() {
         <div className="hg-list tg-list">
           <section className="tg-section">
             <h3>Baralho</h3>
-            <p>95 cartas próprias: a quantidade de cópias de cada carta é igual ao seu valor — o 2 tem 2 cópias, o 7 tem 7, o Rei tem 13. O Ás de Espadas é único (1 cópia só) e tem um poder especial. Além disso, 4 Coringas.</p>
+            <p>Baralho próprio: a quantidade de cópias de cada carta é igual ao seu valor — o 2 tem 2 cópias, o 7 tem 7, o Rei tem 13. O Ás de Espadas é único (1 cópia só) e tem um poder especial.</p>
+            <p>Coringas não são fixos — a mesa tem <strong>3 Coringas por jogador</strong>. Se alguém entra ou sai durante a partida, 3 Coringas entram ou saem do monte junto (nunca mexendo nas mãos/reservas de quem já está jogando).</p>
+            <p>O monte é embaralhado só uma vez, no início da partida — <strong>continua de onde parou</strong> entre rodadas, e só reembaralha o descarte acumulado quando esgota.</p>
           </section>
 
           <section className="tg-section">
             <h3>Seu turno</h3>
-            <p>Na sua vez, escolha <strong>Pedir carta</strong> ou <strong>Parar</strong>. Cada turno resolve só 1 decisão — pedir carta sempre passa a vez pro próximo jogador, mesmo sem estourar.</p>
+            <p>Na sua vez, escolha <strong>Pedir carta</strong>, <strong>Parar</strong>, ou jogar um Coringa em alguém (ver abaixo). Cada turno resolve só 1 decisão — passa a vez pro próximo jogador em seguida.</p>
             <p>Parar trava sua pontuação da rodada com as cartas que você já tem.</p>
           </section>
 
@@ -41,19 +43,14 @@ export function PushYourLuckDrawGuide() {
           </section>
 
           <section className="tg-section">
-            <h3>Coringa (Save)</h3>
-            <p>Um Coringa não conta como carta de valor — fica guardado na sua reserva. Se você for estourar e tiver 1 Coringa guardado, ele te salva automaticamente: descarta o Coringa e a carta duplicada, sua mão continua intacta.</p>
+            <h3>Coringa: guardar ou jogar</h3>
+            <p>Um Coringa não conta como carta de valor — fica guardado na sua reserva. Se você for estourar e tiver ao menos 1 Coringa guardado, ele te salva automaticamente: descarta o Coringa e a carta duplicada, sua mão continua intacta.</p>
+            <p><strong>O 1º Coringa que você pegar fica travado</strong> como essa proteção — nunca pode ser jogado em outro jogador. A partir do 2º, você escolhe: guarda como mais uma proteção, ou <strong>joga em outro jogador</strong> (ainda decidindo a rodada) pra colocar uma carta <strong>@</strong> na mão dele. Na hora de pontuar, o @ divide a pontuação da rodada dele por 2 (o Ás dobra primeiro, depois o @ divide). Um jogador só pode levar um @ por rodada.</p>
           </section>
 
           <section className="tg-section">
             <h3>Ás de Espadas</h3>
             <p>Não vale ponto próprio — se você parar com ele ainda na mão, ele dobra a soma de todas as suas outras cartas daquela rodada.</p>
-          </section>
-
-          <section className="tg-section">
-            <h3>Modo de baralho</h3>
-            <p><strong>Fresco:</strong> cada rodada embaralha as 95 cartas do zero.</p>
-            <p><strong>Persistente:</strong> o monte continua de onde parou entre rodadas — só reembaralha o descarte acumulado quando esgota. Cartas altas e Coringas podem ficar escassos por algumas rodadas.</p>
           </section>
 
           <section className="tg-section">

@@ -5,7 +5,8 @@ import type {
 import { PlayingCard } from './PlayingCard'
 import { PushYourLuckDrawGuide } from './PushYourLuckDrawGuide'
 import type {
-  PushYourLuckDrawDrawEvent, PushYourLuckDrawMatchEnd, PushYourLuckDrawRematchStatus, PushYourLuckDrawStopEvent,
+  PushYourLuckDrawDrawEvent, PushYourLuckDrawMatchEnd, PushYourLuckDrawRematchStatus,
+  PushYourLuckDrawStopEvent, PushYourLuckDrawThrowEvent,
 } from '../hooks/usePushYourLuckDrawGame'
 
 interface Props {
@@ -19,6 +20,7 @@ interface Props {
   turnDeadline: number | null
   lastDraw: PushYourLuckDrawDrawEvent | null
   lastStop: PushYourLuckDrawStopEvent | null
+  lastThrow: PushYourLuckDrawThrowEvent | null
   roundEnd: { players: PushYourLuckDrawPlayer[]; tableState: PushYourLuckDrawTableState } | null
   matchEnd: PushYourLuckDrawMatchEnd | null
   rematch: PushYourLuckDrawRematchStatus | null
@@ -26,11 +28,12 @@ interface Props {
   onStartGame: () => void
   onDraw: () => void
   onStop: () => void
+  onThrowJoker: (targetId: string) => void
   onRematchVote: (accept: boolean) => void
 }
 
 // ─── Live hand-value preview (front-end only) ──────────────────────────────
-// Mirrors server/src/pushyourluckdraw/deck.ts's rankPoints/isAceOfSpades —
+// Mirrors server/src/pushyourluckdraw/gameEngine.ts's computeScore() —
 // purely a display computation off data that's already public (roundHand).
 // The server itself only ever locks roundScore in at stop/bust time; while a
 // player is still 'active' it stays 0 there, on purpose. See .claude/PushYourLuckDraw.md.
@@ -48,8 +51,10 @@ function isAceOfSpades(card: PushYourLuckDrawCard): boolean {
 }
 function liveHandValue(hand: PushYourLuckDrawCard[]): number {
   const hasAce = hand.some(isAceOfSpades)
-  const sum = hand.filter((c) => !isAceOfSpades(c)).reduce((s, c) => s + rankPoints(c.rank!), 0)
-  return hasAce ? sum * 2 : sum
+  const hasHalf = hand.some((c) => c.isHalf)
+  const sum = hand.filter((c) => !isAceOfSpades(c) && !c.isHalf).reduce((s, c) => s + rankPoints(c.rank!), 0)
+  const doubled = hasAce ? sum * 2 : sum
+  return hasHalf ? Math.floor(doubled / 2) : doubled
 }
 /** What to show as "this round" for a player: the live front-end preview
  *  while they're still deciding, the server-locked value once they aren't. */
@@ -61,7 +66,7 @@ function displayRoundValue(p: PushYourLuckDrawPlayer): number {
  *  actual card faces (next to their round hand) instead of a "🃏×N" count —
  *  the server only sends a count (savesHeld), never the card objects themselves. */
 function savedJokerCards(count: number): PushYourLuckDrawCard[] {
-  return Array.from({ length: count }, (_, i) => ({ id: `save-${i}`, suit: null, rank: null, isJoker: true }))
+  return Array.from({ length: count }, (_, i) => ({ id: `save-${i}`, suit: null, rank: null, isJoker: true, isHalf: false }))
 }
 
 function PushYourLuckDrawCardFace({ card, width = 44, highlight = false }: { card: PushYourLuckDrawCard; width?: number; highlight?: boolean }) {
@@ -72,6 +77,16 @@ function PushYourLuckDrawCardFace({ card, width = 44, highlight = false }: { car
         <rect width="52" height="74" rx="5" fill="#fff8e1" stroke="#e0a800" strokeWidth="1.5" />
         <text x="26" y="30" textAnchor="middle" fontSize="8" fontWeight="bold" fill="#b8860b">SAVE</text>
         <text x="26" y="55" textAnchor="middle" fontSize="20" fill="#b8860b">🃏</text>
+      </svg>
+    )
+  }
+  if (card.isHalf) {
+    const height = Math.round(width * 1.4)
+    return (
+      <svg width={width} height={height} viewBox="0 0 52 74" xmlns="http://www.w3.org/2000/svg">
+        <rect width="52" height="74" rx="5" fill="#fdeaea" stroke="#c0392b" strokeWidth="1.5" />
+        <text x="26" y="30" textAnchor="middle" fontSize="8" fontWeight="bold" fill="#c0392b">÷2</text>
+        <text x="26" y="55" textAnchor="middle" fontSize="24" fontWeight="bold" fill="#c0392b">@</text>
       </svg>
     )
   }
@@ -115,8 +130,8 @@ function Scoreboard({ players, myId }: { players: PushYourLuckDrawPlayer[]; myId
 }
 
 export function PushYourLuckDrawTable({
-  myId, roomName, config, players, tableState, isStarted, myTurn, turnDeadline, lastDraw, lastStop,
-  roundEnd, matchEnd, rematch, onLeave, onStartGame, onDraw, onStop, onRematchVote,
+  myId, roomName, config, players, tableState, isStarted, myTurn, turnDeadline, lastDraw, lastStop, lastThrow,
+  roundEnd, matchEnd, rematch, onLeave, onStartGame, onDraw, onStop, onThrowJoker, onRematchVote,
 }: Props) {
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
@@ -128,17 +143,24 @@ export function PushYourLuckDrawTable({
   const me = players.find((p) => p.id === myId)
   const others = players.filter((p) => p.id !== myId)
 
-  const lastEvent = !lastDraw && !lastStop ? null
-    : (lastStop && (!lastDraw || lastStop.key > lastDraw.key)) ? lastStop : lastDraw
+  const candidates = [lastDraw, lastStop, lastThrow].filter((e): e is NonNullable<typeof e> => e !== null)
+  const lastEvent = candidates.length === 0 ? null : candidates.reduce((a, b) => (b.key > a.key ? b : a))
   const bustEvent = lastEvent && lastDraw && lastEvent === lastDraw && lastDraw.outcome === 'busted' && lastDraw.bustedHand ? lastDraw : null
   const logLine = bustEvent ? null : describeEvent(lastEvent, players, myId)
+
+  // Can only throw a spare Joker (1 must always stay in reserve) at another
+  // player still deciding this round who isn't already carrying an '@' —
+  // see .claude/PushYourLuckDraw.md → "Coringa".
+  const throwTargets = myTurn && me && me.savesHeld >= 2
+    ? others.filter((p) => p.status === 'active' && !p.roundHand.some((c) => c.isHalf))
+    : []
 
   return (
     <div className="truco-table">
       <div className="truco-topbar">
         <div>
           <strong>{roomName}</strong>
-          <span className="hint"> · até {config.maxPlayers} jogadores · alvo {config.targetScore} pts · {config.deckMode === 'fresh' ? 'baralho fresco' : 'baralho persistente'}</span>
+          <span className="hint"> · até {config.maxPlayers} jogadores · alvo {config.targetScore} pts · {config.jokerMode === 'fixed' ? '6 Coringas fixos' : '3 Coringas/jogador'}</span>
         </div>
         <button type="button" className="btn-cancel-small" onClick={onLeave}>Sair da mesa</button>
       </div>
@@ -160,9 +182,10 @@ export function PushYourLuckDrawTable({
             <div className="truco-others">
               {others.map((p) => {
                 const active = p.id === tableState.turnPlayerId
+                const halved = p.roundHand.some((c) => c.isHalf)
                 return (
                   <div key={p.id} className={`truco-player-badge pyl-player-badge${active ? ' active-turn' : ''}${p.status === 'busted' ? ' pyl-busted' : ''}`}>
-                    <span className="seat-name">{p.name} — {statusLabel(p.status)}</span>
+                    <span className="seat-name">{p.name} — {statusLabel(p.status)}{halved && ' · @'}</span>
                     <span className="hint">Total {p.totalScore} · Rodada {displayRoundValue(p)}</span>
                     {p.savesHeld > 0 && <span className="hint">🃏×{p.savesHeld}</span>}
                     {(p.roundHand.length > 0 || p.savesHeld > 0) && (
@@ -239,6 +262,19 @@ export function PushYourLuckDrawTable({
                   <button type="button" className="btn-confirm" onClick={onDraw}>Pedir carta</button>
                 </div>
               )}
+
+              {throwTargets.length > 0 && (
+                <div className="pyl-throw-row">
+                  <span className="hint">Jogar @ (mantém 1 Coringa de reserva):</span>
+                  <div className="actions">
+                    {throwTargets.map((t) => (
+                      <button key={t.id} type="button" className="btn-cancel-small" onClick={() => onThrowJoker(t.id)}>
+                        @ → {t.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -296,12 +332,16 @@ export function PushYourLuckDrawTable({
 }
 
 function describeEvent(
-  ev: PushYourLuckDrawDrawEvent | PushYourLuckDrawStopEvent | null,
+  ev: PushYourLuckDrawDrawEvent | PushYourLuckDrawStopEvent | PushYourLuckDrawThrowEvent | null,
   players: PushYourLuckDrawPlayer[],
   myId: string,
 ): string | null {
   if (!ev) return null
   const name = ev.playerId === myId ? 'Você' : (players.find((p) => p.id === ev.playerId)?.name ?? '?')
+  if ('targetId' in ev) {
+    const targetName = ev.targetId === myId ? 'você' : (players.find((p) => p.id === ev.targetId)?.name ?? '?')
+    return `${name} jogou um @ em ${targetName} — pontos da rodada pela metade!`
+  }
   if ('roundScore' in ev) return `${name} parou com ${ev.roundScore} pontos.`
   switch (ev.outcome) {
     case 'drew':   return `${name} comprou ${ev.card?.rank}.`

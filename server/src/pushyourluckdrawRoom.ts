@@ -1,12 +1,12 @@
 import type { PushYourLuckDrawRoomConfig, PushYourLuckDrawRoomSummary, PushYourLuckDrawServerMessage } from '../../shared/types'
-import { PushYourLuckDrawGame } from './pushyourluckdraw/gameEngine'
+import { PushYourLuckDrawGame, type PushYourLuckDrawDisconnectSnapshot } from './pushyourluckdraw/gameEngine'
 import { logger } from './logger'
 
 export type PushYourLuckDrawSendFn = (msg: PushYourLuckDrawServerMessage) => void
 
 interface PushYourLuckDrawRoomPlayer { id: string; name: string; send: PushYourLuckDrawSendFn }
 
-type LeaveReason = 'leave' | 'match_abandoned' | 'rematch_declined' | 'rematch_timeout'
+type LeaveReason = 'leave' | 'disconnect' | 'rematch_declined' | 'rematch_timeout'
 
 export interface PushYourLuckDrawRoomOptions {
   onExpire?: () => void
@@ -19,12 +19,21 @@ const TURN_TIMEOUT_S = Number(process.env.PUSHYOURLUCKDRAW_TIMEOUT ?? 20)
 const ROUND_END_DELAY_MS = Number(process.env.PUSHYOURLUCKDRAW_ROUND_END_DELAY_MS ?? 2500)
 const AUTO_START_DELAY_MS = 300
 
-/** Orchestration for Push Your Luck Draw tables — room/lobby joining mirrors
- *  gofishRoom.ts (free 2-8 seats, auto-starts 300ms after the 2nd join, with
- *  a manual `pushyourluckdraw_start_game` fallback), but the match loop
- *  mirrors trucoRoom.ts (several rounds per match until a target score,
- *  round_end/match_end, then a rematch vote) instead of Go Fish's single
- *  game-to-completion. See .claude/PushYourLuckDraw.md for the rules. */
+/** Orchestration for Push Your Luck Draw tables — free 2-8 seats, auto-starts
+ *  300ms after the 2nd join, with a manual `pushyourluckdraw_start_game`
+ *  fallback. The match loop mirrors trucoRoom.ts (several rounds per match
+ *  until a target score, round_end/match_end, then a rematch vote). See
+ *  .claude/PushYourLuckDraw.md for the rules.
+ *
+ *  Unlike every other game here, a departure mid-match (explicit "Sair da
+ *  mesa", a real disconnect, or declining/missing a rematch vote) never
+ *  dissolves the table by itself — only when it drops to 0 players. The
+ *  departing player's match score is snapshotted so the same identity can
+ *  rejoin mid-match with it restored — but only for the match they left;
+ *  the snapshot is discarded the moment a new match starts (initial start
+ *  or an accepted rematch), so a stale rejoin can never inject old points
+ *  into a match that's already moved on. See .claude/PushYourLuckDraw.md
+ *  → "Sair da Mesa" / "Desconexão". */
 export class PushYourLuckDrawRoom {
   readonly id: string
   readonly name: string
@@ -39,6 +48,10 @@ export class PushYourLuckDrawRoom {
   private rematchTimer: ReturnType<typeof setTimeout> | null = null
   private turnTimer: ReturnType<typeof setTimeout> | null = null
   private turnDeadlineAt: number | null = null
+  /** Score snapshots for players who left/disconnected mid-match, keyed by
+   *  playerId — consumed (and deleted) on a matching rejoin, and wholesale
+   *  cleared every time a new match starts. See class doc above. */
+  private disconnectedScores = new Map<string, PushYourLuckDrawDisconnectSnapshot>()
   private readonly onExpire?: () => void
   private readonly onDissolve?: () => void
 
@@ -92,12 +105,20 @@ export class PushYourLuckDrawRoom {
    *  `game.addPlayer()`), which the turn-rotation/round-completion logic
    *  already treats as "not in this round" — they're automatically promoted
    *  to `'active'` the moment the next round is dealt, no special-casing
-   *  needed in the engine. Leaving mid-match still dissolves the table
-   *  (unchanged — see `leave()` below), only the join side got relaxed. */
+   *  needed in the engine. If this identity left/disconnected earlier in
+   *  the *current* match, their preserved score is restored right away —
+   *  see class doc above. */
   join(id: string, name: string, send: PushYourLuckDrawSendFn): boolean {
     if (this.isFull) return false
     this.players.push({ id, name, send })
     this.game.addPlayer(id, name)
+
+    const snapshot = this.disconnectedScores.get(id)
+    if (snapshot) {
+      this.game.restoreScore(id, snapshot)
+      this.disconnectedScores.delete(id)
+    }
+
     send({ type: 'pushyourluckdraw_room_joined', roomId: this.id, roomName: this.name, config: this.config, yourId: id })
     this.broadcastAll({ type: 'pushyourluckdraw_player_list', players: this.game.publicPlayers() })
     this.clearExpiry()
@@ -127,31 +148,85 @@ export class PushYourLuckDrawRoom {
     return true
   }
 
-  /** Leaving mid-match still dissolves the table — joining got relaxed
-   *  above, but a departure mid-round has no clean "pause and wait" state
-   *  to fall back to (their round hand, turn order, etc. would all need
-   *  resolving), so it stays out of scope. */
+  /** Explicit "Sair da mesa" (also used for a rematch decline/timeout —
+   *  both are just "leaving" from here on). Pre-start, this is just freeing
+   *  a seat (no score exists yet). Mid-match, it goes through
+   *  removeAndPreserveScore() — the table stays open for whoever's left,
+   *  and this identity can rejoin mid-match with their score intact (see
+   *  class doc above). Messages the leaving player directly (skipped for a
+   *  real disconnect — the socket's already gone) since removal excludes
+   *  them from every subsequent broadcastAll(), unlike the old
+   *  dissolve-everyone behavior. */
   leave(playerId: string, reason: LeaveReason = 'leave'): void {
-    const wasPresent = this.players.some((p) => p.id === playerId)
-    if (!wasPresent) return
+    const rp = this.players.find((p) => p.id === playerId)
+    if (!rp) return
 
-    if (this.started) {
-      this.players = this.players.filter((p) => p.id !== playerId)
-      this.broadcastAll({ type: 'pushyourluckdraw_room_left', reason: 'abandoned' })
-      this.destroy()
-      this.onDissolve?.()
-      return
+    if (reason !== 'disconnect') {
+      rp.send({ type: 'pushyourluckdraw_room_left', reason: reason === 'leave' ? 'manual' : 'rematch_declined' })
     }
 
-    this.players = this.players.filter((p) => p.id !== playerId)
-    this.game.removePlayer(playerId)
-    this.broadcastAll({ type: 'pushyourluckdraw_player_list', players: this.game.publicPlayers() })
-    if (this.players.length === 0) this.destroy()
-    else this.scheduleExpiry()
+    if (this.started) {
+      this.removeAndPreserveScore(playerId)
+    } else {
+      this.players = this.players.filter((p) => p.id !== playerId)
+      this.game.removePlayer(playerId)
+      this.broadcastAll({ type: 'pushyourluckdraw_player_list', players: this.game.publicPlayers() })
+      if (this.players.length === 0) this.destroy()
+      else this.scheduleExpiry()
+    }
 
     logger.info('pushyourluckdraw_player_left_room', {
       'pushyourluckdraw.room_id': this.id, 'pushyourluckdraw.player_id': playerId, 'pushyourluckdraw.reason': reason,
     })
+  }
+
+  /** A real disconnect (closed tab/app) — no explicit request to reply to
+   *  (the socket's already gone), otherwise identical to leave(). */
+  handleDisconnect(playerId: string): void {
+    this.leave(playerId, 'disconnect')
+  }
+
+  /** Shared tail for any way a player stops being at the table mid-match —
+   *  removes them from the engine (same seat/Joker-rescale bookkeeping as
+   *  any other removal), snapshots their match score for a possible
+   *  same-match rejoin, and only destroys the table if that leaves it
+   *  completely empty. Never re-triggers finishRound()/finishMatch() when
+   *  the round/match had already concluded before this call (see the
+   *  phase-based branches below) — those only ever fire from a real turn
+   *  action, exactly once. */
+  private removeAndPreserveScore(playerId: string): void {
+    const phaseBefore = this.game.tableState.phase
+    const wasVotingRematch = phaseBefore === 'match_complete'
+
+    const snapshot = this.game.disconnectPlayer(playerId)
+    this.players = this.players.filter((p) => p.id !== playerId)
+    this.rematchVotes.delete(playerId)
+    if (snapshot) this.disconnectedScores.set(playerId, snapshot)
+
+    if (this.players.length === 0) { this.destroy(); this.onDissolve?.(); return }
+
+    this.broadcastAll({ type: 'pushyourluckdraw_player_list', players: this.game.publicPlayers() })
+
+    if (wasVotingRematch) {
+      // Already past match-end, mid rematch-vote — just refresh the tally,
+      // never re-run the match-end flow.
+      this.refreshRematchVote()
+      return
+    }
+
+    if (phaseBefore === 'playing') {
+      // A round was actually live — mirror the exact tail every turn action
+      // uses (finishRound() if that was the last decision needed, otherwise
+      // notify whoever's now current).
+      if (this.game.isRoundComplete()) { this.finishRound(); return }
+      this.notifyCurrentPlayer()
+      return
+    }
+
+    // phaseBefore === 'round_complete': removed during the brief gap between
+    // a round ending and the next one dealing — the dealNextRound()/
+    // finishMatch() timer already scheduled by the finishRound() call that
+    // ended it will pick up the now-smaller player list on its own.
   }
 
   // ── Match / round lifecycle ─────────────────────────────────────────────
@@ -166,6 +241,7 @@ export class PushYourLuckDrawRoom {
     }
     this.started = true
     this.clearExpiry()
+    this.disconnectedScores.clear()   // a new match starting invalidates any older match's snapshots
     this.broadcastAll({ type: 'pushyourluckdraw_game_started' })
     this.game.startMatch()
     this.broadcastRoundStarted()
@@ -207,6 +283,19 @@ export class PushYourLuckDrawRoom {
     this.notifyCurrentPlayer()
   }
 
+  handleThrowJoker(pid: string, targetId: string): void {
+    const ok = this.game.throwJoker(pid, targetId)
+    if (!ok) { this.sendTo(pid, { type: 'pushyourluckdraw_room_error', message: 'Jogada inválida.' }); return }
+
+    this.broadcastAll({
+      type: 'pushyourluckdraw_throw_result', playerId: pid, targetId,
+      players: this.game.publicPlayers(), tableState: this.game.tableState,
+    })
+
+    if (this.game.isRoundComplete()) { this.finishRound(); return }
+    this.notifyCurrentPlayer()
+  }
+
   private finishRound(): void {
     this.clearTurnTimer()
     this.broadcastAll({ type: 'pushyourluckdraw_round_end', players: this.game.publicPlayers(), tableState: this.game.tableState })
@@ -235,30 +324,45 @@ export class PushYourLuckDrawRoom {
   private startRematchVote(): void {
     this.rematchVotes.clear()
     this.broadcastAll({ type: 'pushyourluckdraw_rematch_status', accepted: [], pending: this.players.map((p) => p.id) })
-    this.rematchTimer = setTimeout(() => this.dissolveForRematch(), REMATCH_TIMEOUT_S * 1000)
+    this.rematchTimer = setTimeout(() => this.handleRematchTimeout(), REMATCH_TIMEOUT_S * 1000)
   }
 
+  /** Declining is just leaving from here on — the table stays open for
+   *  whoever else is still around (see class doc above); it no longer
+   *  vetoes everyone else's rematch. */
   handleRematchVote(pid: string, accept: boolean): void {
     if (!this.players.some((p) => p.id === pid)) return
-    if (!accept) { this.dissolveForRematch(); return }
+    if (!accept) { this.leave(pid, 'rematch_declined'); return }
 
     this.rematchVotes.add(pid)
+    this.refreshRematchVote()
+  }
+
+  /** Re-broadcasts the rematch tally (used both after a fresh vote and
+   *  after a voter left/disconnected mid-vote), and starts the rematch the
+   *  moment every remaining seated player has accepted. */
+  private refreshRematchVote(): void {
     const accepted = [...this.rematchVotes]
     const pending = this.players.map((p) => p.id).filter((id) => !this.rematchVotes.has(id))
     this.broadcastAll({ type: 'pushyourluckdraw_rematch_status', accepted, pending })
 
     if (pending.length === 0) {
       if (this.rematchTimer) { clearTimeout(this.rematchTimer); this.rematchTimer = null }
+      this.disconnectedScores.clear()   // a new match starting invalidates any older match's snapshots
       this.game.startMatch()
       this.broadcastRoundStarted()
     }
   }
 
-  private dissolveForRematch(): void {
-    if (this.rematchTimer) { clearTimeout(this.rematchTimer); this.rematchTimer = null }
-    this.broadcastAll({ type: 'pushyourluckdraw_room_left', reason: 'rematch_declined' })
-    this.destroy()
-    this.onDissolve?.()
+  /** Fires when the rematch vote's window closes without everyone having
+   *  voted — anyone who never voted is treated the same as an explicit
+   *  decline (removed, score preserved for a possible same-match rejoin —
+   *  though there's no "match" left to rejoin once this closes it out).
+   *  The table only actually closes if that leaves it completely empty. */
+  private handleRematchTimeout(): void {
+    this.rematchTimer = null
+    const stragglers = this.players.map((p) => p.id).filter((id) => !this.rematchVotes.has(id))
+    for (const id of stragglers) this.leave(id, 'rematch_timeout')
   }
 
   // ── Turn notification ────────────────────────────────────────────────────

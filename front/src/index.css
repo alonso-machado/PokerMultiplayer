@@ -799,17 +799,9 @@ input:focus { border-color: var(--gold); }
 .bj-error { color: #e07070; }
 .bj-lobby-stats { color: var(--gold-light); font-weight: 600; margin-bottom: 0.6rem; }
 
-/* ── Go Fish (reuses the .truco-table/.action-bar shell) ──────────────────── */
-.gf-player-badge { cursor: default; }
-.gf-player-badge:disabled { opacity: 0.85; }
-.gf-player-badge:not(:disabled) { cursor: pointer; border-color: var(--gold); }
-.gf-player-badge:not(:disabled):hover { box-shadow: 0 0 10px rgba(201,168,76,0.5); }
-.gf-out { opacity: 0.45; }
+/* ── Shared stock/log shell (also used by Push Your Luck Draw below) ──────── */
 .gf-stock { display: flex; flex-direction: column; align-items: center; gap: 0.3rem; }
 .gf-log { text-align: center; font-size: 0.82rem; color: var(--gold-light); background: rgba(201,168,76,0.1); border-radius: 8px; padding: 0.4rem 0.7rem; margin: 0 auto; max-width: 90%; }
-.gf-my-books { display: flex; gap: 0.4rem; flex-wrap: wrap; justify-content: center; }
-.gf-book-badge { font-size: 0.72rem; font-weight: 700; color: var(--gold-light); background: rgba(201,168,76,0.12); border-radius: 8px; padding: 0.15rem 0.5rem; }
-.gf-rank-row { flex-wrap: wrap; }
 
 /* ── Push Your Luck Draw (reuses the .truco-table shell) ───────────────────── */
 .pyl-player-badge { cursor: default; display: flex; flex-direction: column; gap: 0.25rem; align-items: center; }
@@ -842,3 +834,7 @@ input:focus { border-color: var(--gold); }
 .pyl-bust-title { font-size: 0.82rem; font-weight: 700; color: #e07070; margin-bottom: 0.4rem; }
 .pyl-bust-cards { display: flex; flex-wrap: wrap; gap: 0.3rem; justify-content: center; }
 .pyl-bust-highlight { filter: drop-shadow(0 0 6px rgba(192,57,43,0.95)); border-radius: 6px; outline: 2px solid #e07070; }
+
+/* Spare-Joker throw picker — offered alongside Pedir/Parar when a player holds 2+ saves. */
+.pyl-throw-row { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; margin-top: 0.4rem; padding-top: 0.4rem; border-top: 1px dashed rgba(192,57,43,0.4); }
+.pyl-throw-row .actions { flex-wrap: wrap; justify-content: center; }

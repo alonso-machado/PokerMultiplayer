@@ -112,61 +112,44 @@ mãos até uma pontuação alvo).
   `session.canastraRoomId` + `currentCanastraRoom()`, espelhando
   `currentTrucoRoom()`/`currentGauchoRoom()`.
 
-## Go Fish
-
-Sistema totalmente paralelo, mesmo padrão da Canastra — não compartilha
-`Room` nem estado com os outros jogos. Ver `.claude/GoFish.md` para as
-regras. Diferenças de arquitetura em relação à Canastra: sem times, sem
-tipo de carta próprio (reusa `Card`/`Rank` de `shared/types.ts` — baralho
-único de 52, sem duplicatas), e a mesa **não** espera lotar pra começar —
-segue o padrão de auto-start do lobby de Poker/Truco (300ms após o 2º
-jogador entrar, com `gofish_start_game` manual como fallback).
-
-- `gofish/gameEngine.ts` (`GoFishGame`) — reusa `createDeck`/`shuffle` de
-  `poker/deck.ts` diretamente (mesmo baralho de 52, sem duplicar código).
-  Máquina de estados de uma partida: mãos, monte, baralhos formados, pedir
-  (`ask`) com toda a lógica de pegada/pescaria/continuação de turno, compra
-  automática de mão vazia, eliminação por "fora da partida".
-- `gofishRoom.ts` (`GoFishRoom`) — assentos, ciclo da partida, votação de
-  revanche, timeout de turno (`GOFISH_TIMEOUT`, default 30s — pedido às
-  cegas de um valor aleatório da mão a um oponente aleatório ainda em jogo).
-- `index.ts`: `gofishRooms` é um `Map` separado; roteamento via
-  `session.gofishRoomId` + `currentGoFishRoom()`, espelhando
-  `currentCanastraRoom()`.
-
 ## Push Your Luck Draw
 
 Sistema totalmente paralelo — regra **original** (não adaptada de terceiros),
 ver `.claude/PushYourLuckDraw.md`. Arquitetura híbrida: entrada de sala livre
-2-8 sem times (como o Go Fish, auto-start 300ms após o 2º join), mas o loop
-de partida repete **várias rodadas até alguém atingir a pontuação-alvo**
-(como o Truco: `round_end`/`match_end` + votação de revanche), diferente do
-Go Fish (uma partida = um jogo só até o fim). Todas as mãos da rodada são
-**públicas** — não há mensagem de mão privada, único jogo do catálogo assim.
-**Único jogo do catálogo que aceita entrada a qualquer momento** — inclusive
-com a partida em andamento/no meio de uma rodada (mesa "family-friendly",
-só a lotação bloqueia); quem entra assim fica `waiting` até a próxima
-rodada. Sair em andamento continua dissolvendo a mesa, como nos outros.
+2-8 sem times (auto-start 300ms após o 2º join, mesmo padrão do lobby de
+Poker/Truco), mas o loop de partida repete **várias rodadas até alguém
+atingir a pontuação-alvo** (como o Truco: `round_end`/`match_end` + votação
+de revanche). Todas as mãos da rodada são **públicas** — não há mensagem de
+mão privada, único jogo do catálogo assim. **Único jogo do catálogo que
+aceita entrada a qualquer momento** — inclusive com a partida em
+andamento/no meio de uma rodada (mesa "family-friendly", só a lotação
+bloqueia); quem entra assim fica `waiting` até a próxima rodada, e dispara
+o ajuste ao vivo de Coringas no monte (ver abaixo). Sair em andamento
+continua dissolvendo a mesa, como nos outros.
 
-- `pushyourluckdraw/deck.ts` — baralho próprio de 95 cartas: cópias(rank) =
-  valor(rank) para todo rank numerado/de figura (o 7 tem 7 cópias, o K tem
-  13), 1 Ás de Espadas (multiplicador ×2) e 4 Coringas (save).
+- `pushyourluckdraw/deck.ts` — baralho próprio: cópias(rank) = valor(rank)
+  para todo rank numerado/de figura (o 7 tem 7 cópias, o K tem 13), 1 Ás de
+  Espadas (multiplicador ×2) e `JOKERS_PER_PLAYER` (3) Coringas por jogador
+  sentado — não um total fixo.
 - `pushyourluckdraw/gameEngine.ts` (`PushYourLuckDrawGame`) — máquina de
-  estados de uma partida: turnos pedir/parar (1 decisão por turno, sempre
-  passa a vez), estouro por duplicata de rank, salvamento por Coringa,
-  multiplicador do Ás, dois modos de baralho (`fresh` reconstrói 95 cartas
-  a cada rodada; `persistent` mantém monte/descarte entre rodadas dentro da
-  mesma partida, só reembaralhando ao esgotar), fim de rodada só quando
-  todos pararam/estouraram, fim de partida só no limite da rodada (nunca no
-  meio) com o **maior total** vencendo — não necessariamente quem cruzou o
-  alvo primeiro.
+  estados de uma partida: turnos pedir/parar/jogar-Coringa (1 decisão por
+  turno, sempre passa a vez), estouro por duplicata de rank, salvamento por
+  Coringa (o 1º guardado é proteção travada, do 2º em diante pode ser
+  jogado em outro jogador pra colocar um `@` que divide a pontuação da
+  rodada dele por 2), multiplicador do Ás, monte/descarte únicos por
+  partida (nunca reconstruídos por rodada, só reembaralhados do descarte
+  acumulado ao esgotar), `addPlayer`/`removePlayer` ajustando o monte em
+  `±JOKERS_PER_PLAYER` Coringas quando a partida já está em andamento, fim
+  de rodada só quando todos pararam/estouraram, fim de partida só no limite
+  da rodada (nunca no meio) com o **maior total** vencendo — não
+  necessariamente quem cruzou o alvo primeiro.
 - `pushyourluckdrawRoom.ts` (`PushYourLuckDrawRoom`) — assentos livres,
   ciclo de rodadas/partida, votação de revanche, timeout de turno
   (`PUSHYOURLUCKDRAW_TIMEOUT`, default 20s — **para automaticamente**, nunca
   compra carta às cegas).
 - `index.ts`: `pushyourluckdrawRooms` é um `Map` separado; roteamento via
   `session.pushyourluckdrawRoomId` + `currentPushYourLuckDrawRoom()`,
-  espelhando `currentGoFishRoom()`.
+  espelhando `currentCanastraRoom()`.
 
 ## Rotas HTTP
 

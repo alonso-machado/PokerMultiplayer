@@ -16,7 +16,6 @@ import { TrucoRoom } from './trucoRoom'
 import { GauchoRoom } from './gauchoRoom'
 import { CanastraRoom } from './canastraRoom'
 import { BlackjackRoom } from './blackjackRoom'
-import { GoFishRoom } from './gofishRoom'
 import { PushYourLuckDrawRoom } from './pushyourluckdrawRoom'
 import { Tournament } from './tournament'
 import { adminRouter, publicTournamentHandler } from './admin'
@@ -28,7 +27,6 @@ const trucoRooms = new Map<string, TrucoRoom>()
 const gauchoRooms = new Map<string, GauchoRoom>()
 const canastraRooms = new Map<string, CanastraRoom>()
 const blackjackRooms = new Map<string, BlackjackRoom>()
-const gofishRooms = new Map<string, GoFishRoom>()
 const pushyourluckdrawRooms = new Map<string, PushYourLuckDrawRoom>()
 let activeTournament: Tournament | null = null
 
@@ -41,7 +39,6 @@ interface PersistentSession {
   gauchoRoomId: string | null
   canastraRoomId: string | null
   blackjackRoomId: string | null
-  gofishRoomId: string | null
   pushyourluckdrawRoomId: string | null
   tournamentToken: string | null
 }
@@ -56,7 +53,6 @@ interface Session {
   gauchoRoomId: string | null
   canastraRoomId: string | null
   blackjackRoomId: string | null
-  gofishRoomId: string | null
   pushyourluckdrawRoomId: string | null
   tournamentToken: string | null
 }
@@ -107,10 +103,6 @@ function currentCanastraRoom(session: Session): CanastraRoom | undefined {
 
 function currentBlackjackRoom(session: Session): BlackjackRoom | undefined {
   return session.blackjackRoomId ? blackjackRooms.get(session.blackjackRoomId) : undefined
-}
-
-function currentGoFishRoom(session: Session): GoFishRoom | undefined {
-  return session.gofishRoomId ? gofishRooms.get(session.gofishRoomId) : undefined
 }
 
 function currentPushYourLuckDrawRoom(session: Session): PushYourLuckDrawRoom | undefined {
@@ -219,7 +211,7 @@ const server = Bun.serve<Session>({
 
     if (pathname === '/ws') {
       const ok = server.upgrade(req, {
-        data: { playerId: '', name: 'Jogador', roomId: null, trucoRoomId: null, gauchoRoomId: null, canastraRoomId: null, blackjackRoomId: null, gofishRoomId: null, pushyourluckdrawRoomId: null, tournamentToken: null } as Session,
+        data: { playerId: '', name: 'Jogador', roomId: null, trucoRoomId: null, gauchoRoomId: null, canastraRoomId: null, blackjackRoomId: null, pushyourluckdrawRoomId: null, tournamentToken: null } as Session,
       })
       return ok ? undefined : new Response('Upgrade failed', { status: 400 })
     }
@@ -254,7 +246,6 @@ const server = Bun.serve<Session>({
       send(ws, { type: 'gaucho_room_list', rooms: gauchoRoomList() })
       send(ws, { type: 'canastra_room_list', rooms: canastraRoomList() })
       send(ws, { type: 'blackjack_lobby_stats', ...blackjackLobbyStats() })
-      send(ws, { type: 'gofish_room_list', rooms: gofishRoomList() })
       send(ws, { type: 'pushyourluckdraw_room_list', rooms: pushyourluckdrawRoomList() })
       send(ws, { type: 'tournament_info', tournament: activeTournament?.info() ?? null })
     },
@@ -331,16 +322,6 @@ const server = Bun.serve<Session>({
               existing.blackjackRoomId = null
             }
           }
-          // Reconnect to Go Fish room
-          if (existing.gofishRoomId) {
-            const gofishRoom = gofishRooms.get(existing.gofishRoomId)
-            if (gofishRoom) {
-              session.gofishRoomId = existing.gofishRoomId
-              gofishRoom.reconnect(pid, emit)
-            } else {
-              existing.gofishRoomId = null
-            }
-          }
           // Reconnect to Push Your Luck Draw room
           if (existing.pushyourluckdrawRoomId) {
             const pushyourluckdrawRoom = pushyourluckdrawRooms.get(existing.pushyourluckdrawRoomId)
@@ -355,7 +336,7 @@ const server = Bun.serve<Session>({
           existing.name = session.name
           session.tournamentToken = session.tournamentToken ?? existing.tournamentToken
         } else {
-          playerSessions.set(pid, { playerId: pid, name: session.name, roomId: null, trucoRoomId: null, gauchoRoomId: null, canastraRoomId: null, blackjackRoomId: null, gofishRoomId: null, pushyourluckdrawRoomId: null, tournamentToken: session.tournamentToken })
+          playerSessions.set(pid, { playerId: pid, name: session.name, roomId: null, trucoRoomId: null, gauchoRoomId: null, canastraRoomId: null, blackjackRoomId: null, pushyourluckdrawRoomId: null, tournamentToken: session.tournamentToken })
         }
 
         // Restore tournament registration
@@ -752,58 +733,6 @@ const server = Bun.serve<Session>({
           break
         }
 
-        // ── Go Fish ────────────────────────────────────────────────────────
-        case 'gofish_list_rooms': emit({ type: 'gofish_room_list', rooms: gofishRoomList() }); break
-
-        case 'gofish_create_room': {
-          const room = new GoFishRoom(generateId(), msg.roomName.trim().slice(0, 40) || 'Mesa', session.name, msg.config, {
-            onExpire: () => { gofishRooms.delete(room.id); broadcastGoFishRoomList() },
-            onDissolve: () => { gofishRooms.delete(room.id); broadcastGoFishRoomList() },
-          })
-          gofishRooms.set(room.id, room)
-          room.join(session.playerId, session.name, emit)   // creator auto-joins
-          session.gofishRoomId = room.id
-          setPersistentGoFishRoom(session.playerId, room.id)
-          broadcastGoFishRoomList()
-          break
-        }
-
-        case 'gofish_join_room': {
-          const room = gofishRooms.get(msg.roomId)
-          if (!room)       { emit({ type: 'gofish_room_error', message: 'Mesa não encontrada.' }); break }
-          if (room.isFull) { emit({ type: 'gofish_room_error', message: 'Mesa cheia.' }); break }
-          if (room.isStarted) { emit({ type: 'gofish_room_error', message: 'Partida em andamento.' }); break }
-          if (session.gofishRoomId) leaveGoFishRoom(ws)
-          room.join(session.playerId, session.name, emit)
-          session.gofishRoomId = room.id
-          setPersistentGoFishRoom(session.playerId, room.id)
-          broadcastGoFishRoomList()
-          break
-        }
-
-        case 'gofish_leave_room':
-          leaveGoFishRoom(ws)
-          emit({ type: 'gofish_room_left', reason: 'manual' })
-          break
-
-        case 'gofish_start_game': {
-          const room = currentGoFishRoom(session)
-          room?.startMatch(session.playerId)
-          break
-        }
-
-        case 'gofish_ask': {
-          const room = currentGoFishRoom(session)
-          room?.handleAsk(session.playerId, msg.targetPlayerId, msg.rank)
-          break
-        }
-
-        case 'gofish_rematch_vote': {
-          const room = currentGoFishRoom(session)
-          room?.handleRematchVote(session.playerId, msg.accept)
-          break
-        }
-
         // ── Push Your Luck Draw ───────────────────────────────────────────
         case 'pushyourluckdraw_list_rooms': emit({ type: 'pushyourluckdraw_room_list', rooms: pushyourluckdrawRoomList() }); break
 
@@ -835,8 +764,10 @@ const server = Bun.serve<Session>({
         }
 
         case 'pushyourluckdraw_leave_room':
+          // room.leave() already messages the leaving player directly (see
+          // pushyourluckdrawRoom.ts) — the table no longer dissolves on a
+          // mid-match leave, so it can't rely on a broadcastAll() reaching them.
           leavePushYourLuckDrawRoom(ws)
-          emit({ type: 'pushyourluckdraw_room_left', reason: 'manual' })
           break
 
         case 'pushyourluckdraw_start_game': {
@@ -854,6 +785,12 @@ const server = Bun.serve<Session>({
         case 'pushyourluckdraw_stop': {
           const room = currentPushYourLuckDrawRoom(session)
           room?.handleStop(session.playerId)
+          break
+        }
+
+        case 'pushyourluckdraw_throw_joker': {
+          const room = currentPushYourLuckDrawRoom(session)
+          room?.handleThrowJoker(session.playerId, msg.targetId)
           break
         }
 
@@ -892,11 +829,16 @@ const server = Bun.serve<Session>({
       logger.info('player_disconnected', { 'poker.player_id': ws.data.playerId || null })
       // Lobby players stay in their room (persistent session handles reconnect)
       // Tournament players stay registered via token cookie
-      // Blackjack is the one exception: closing the tab counts as leaving —
-      // same as clicking "Sair da mesa" — so the table doesn't sit waiting
-      // on a seat/turn that can never act again, and the seat/chips aren't
-      // held for a comeback (see .claude/Blackjack.md → "Sair da mesa").
+      // Blackjack: closing the tab counts as leaving — same as clicking "Sair
+      // da mesa" — so the table doesn't sit waiting on a seat/turn that can
+      // never act again, and the seat/chips aren't held for a comeback (see
+      // .claude/Blackjack.md → "Sair da mesa").
       if (ws.data.blackjackRoomId) leaveBlackjackRoom(ws)
+      // Push Your Luck Draw: also treated as leaving immediately (table stays
+      // open for whoever's left, never dissolves on just one departure), but
+      // unlike Blackjack the match score is preserved for a same-match rejoin
+      // — see .claude/PushYourLuckDraw.md → "Desconexão".
+      if (ws.data.pushyourluckdrawRoomId) disconnectPushYourLuckDrawPlayer(ws)
     },
   },
 })
@@ -992,30 +934,31 @@ function setPersistentBlackjackRoom(pid: string, blackjackRoomId: string | null)
   if (ps) ps.blackjackRoomId = blackjackRoomId
 }
 
-function leaveGoFishRoom(ws: { data: Session }): void {
-  const { playerId, gofishRoomId } = ws.data
-  if (!gofishRoomId) return
-  const room = gofishRooms.get(gofishRoomId)
-  if (room) {
-    room.leave(playerId)
-    if (room.playerCount === 0) { room.destroy(); gofishRooms.delete(gofishRoomId) }
-  }
-  ws.data.gofishRoomId = null
-  setPersistentGoFishRoom(playerId, null)
-  broadcastGoFishRoomList()
-}
-
-function setPersistentGoFishRoom(pid: string, gofishRoomId: string | null): void {
-  const ps = playerSessions.get(pid)
-  if (ps) ps.gofishRoomId = gofishRoomId
-}
-
 function leavePushYourLuckDrawRoom(ws: { data: Session }): void {
   const { playerId, pushyourluckdrawRoomId } = ws.data
   if (!pushyourluckdrawRoomId) return
   const room = pushyourluckdrawRooms.get(pushyourluckdrawRoomId)
   if (room) {
     room.leave(playerId)
+    if (room.playerCount === 0) { room.destroy(); pushyourluckdrawRooms.delete(pushyourluckdrawRoomId) }
+  }
+  ws.data.pushyourluckdrawRoomId = null
+  setPersistentPushYourLuckDrawRoom(playerId, null)
+  broadcastPushYourLuckDrawRoomList()
+}
+
+/** WS close counts as an immediate departure (score preserved for a
+ *  same-match rejoin) — see close() above and .claude/PushYourLuckDraw.md
+ *  → "Desconexão". Clearing the persistent room id here (unlike every other
+ *  game) is deliberate: they're actually gone from `room.players` now, so a
+ *  later `hello` must NOT auto-reconnect them — it should land them back in
+ *  the lobby, where re-joining the same room restores their score. */
+function disconnectPushYourLuckDrawPlayer(ws: { data: Session }): void {
+  const { playerId, pushyourluckdrawRoomId } = ws.data
+  if (!pushyourluckdrawRoomId) return
+  const room = pushyourluckdrawRooms.get(pushyourluckdrawRoomId)
+  if (room) {
+    room.handleDisconnect(playerId)
     if (room.playerCount === 0) { room.destroy(); pushyourluckdrawRooms.delete(pushyourluckdrawRoomId) }
   }
   ws.data.pushyourluckdrawRoomId = null
@@ -1038,7 +981,6 @@ function lobbyRoomCount() { return [...rooms.values()].filter(r => !r.tournament
 function trucoRoomList()  { return [...trucoRooms.values()].map(r => r.summary()) }
 function gauchoRoomList() { return [...gauchoRooms.values()].map(r => r.summary()) }
 function canastraRoomList() { return [...canastraRooms.values()].map(r => r.summary()) }
-function gofishRoomList() { return [...gofishRooms.values()].map(r => r.summary()) }
 function pushyourluckdrawRoomList() { return [...pushyourluckdrawRooms.values()].map(r => r.summary()) }
 
 function broadcastRoomList(): void {
@@ -1052,9 +994,6 @@ function broadcastGauchoRoomList(): void {
 }
 function broadcastCanastraRoomList(): void {
   server.publish('lobby', JSON.stringify({ type: 'canastra_room_list', rooms: canastraRoomList() } satisfies ServerMessage))
-}
-function broadcastGoFishRoomList(): void {
-  server.publish('lobby', JSON.stringify({ type: 'gofish_room_list', rooms: gofishRoomList() } satisfies ServerMessage))
 }
 function broadcastPushYourLuckDrawRoomList(): void {
   server.publish('lobby', JSON.stringify({ type: 'pushyourluckdraw_room_list', rooms: pushyourluckdrawRoomList() } satisfies ServerMessage))

@@ -24,6 +24,11 @@ export interface PushYourLuckDrawStopEvent {
   playerId: string
   roundScore: number
 }
+export interface PushYourLuckDrawThrowEvent {
+  key: number
+  playerId: string
+  targetId: string
+}
 
 interface PushYourLuckDrawGameState {
   myId: string
@@ -38,6 +43,7 @@ interface PushYourLuckDrawGameState {
   myTurn: boolean
   lastDraw: PushYourLuckDrawDrawEvent | null
   lastStop: PushYourLuckDrawStopEvent | null
+  lastThrow: PushYourLuckDrawThrowEvent | null
   roundEnd: { players: PushYourLuckDrawPlayer[]; tableState: PushYourLuckDrawTableState } | null
   matchEnd: PushYourLuckDrawMatchEnd | null
   rematch: PushYourLuckDrawRematchStatus | null
@@ -48,7 +54,7 @@ function initialState(myId: string): PushYourLuckDrawGameState {
   return {
     myId, roomId: null, roomName: '', config: null, players: [], tableState: null,
     isStarted: false, turnDeadline: null, myTurn: false,
-    lastDraw: null, lastStop: null, roundEnd: null, matchEnd: null, rematch: null, error: null,
+    lastDraw: null, lastStop: null, lastThrow: null, roundEnd: null, matchEnd: null, rematch: null, error: null,
   }
 }
 
@@ -69,7 +75,7 @@ function reducer(state: PushYourLuckDrawGameState, msg: ServerMessage): PushYour
     case 'pushyourluckdraw_round_started':
       return {
         ...state, players: msg.players, tableState: msg.tableState,
-        myTurn: false, turnDeadline: null, lastDraw: null, lastStop: null, roundEnd: null,
+        myTurn: false, turnDeadline: null, lastDraw: null, lastStop: null, lastThrow: null, roundEnd: null,
       }
     case 'pushyourluckdraw_state_update':
       return { ...state, players: msg.players, tableState: msg.tableState }
@@ -84,6 +90,11 @@ function reducer(state: PushYourLuckDrawGameState, msg: ServerMessage): PushYour
       return {
         ...state, players: msg.players, tableState: msg.tableState, myTurn: false, turnDeadline: null,
         lastStop: { key: ++eventSeq, playerId: msg.playerId, roundScore: msg.roundScore },
+      }
+    case 'pushyourluckdraw_throw_result':
+      return {
+        ...state, players: msg.players, tableState: msg.tableState, myTurn: false, turnDeadline: null,
+        lastThrow: { key: ++eventSeq, playerId: msg.playerId, targetId: msg.targetId },
       }
     case 'pushyourluckdraw_round_end':
       return {

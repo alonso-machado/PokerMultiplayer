@@ -156,46 +156,29 @@ duplo repete naipe+valor) e `suit`/`rank` nuláveis pros curingões.
 `CanastraTable` renderiza via um wrapper local (`CanastraCardFace`) que
 cai pro componente `PlayingCard` normal quando não é curingão.
 
-## Go Fish
-
-Aba separada (`🎣 Go Fish` no seletor de jogo). Estado isolado via
-`useGoFishGame` (`hooks/useGoFishGame.ts`), um `useReducer` que recebe
-qualquer `ServerMessage` cujo `type` comece com `gofish_` (roteado no
-`default:` do switch principal do `App.tsx`, mesmo padrão do
-Truco/Gaúcho/Canastra).
-
-- `GoFishLobby.tsx` — criar/listar mesas (nome + máximo de jogadores 2-6).
-- `GoFishTable.tsx` — mesa: oponentes clicáveis como alvo do pedido (nome,
-  contagem de cartas, baralhos formados, turno em destaque), monte, minha
-  mão renderizada com `PlayingCard` comum (sem wrapper — Go Fish usa o tipo
-  `Card` normal, não precisa de um tipo de carta próprio como a Canastra),
-  botões de valor deduplicados da mão pra escolher o pedido, log transiente
-  do último pedido (`gofish_ask_result`), overlay de fim de partida com
-  baralhos por jogador e votação de revanche.
-- `GoFishGuide.tsx` — painel de regras (reutiliza o shell CSS
-  `.hand-guide-*` do `HandGuide.tsx`).
-
 ## Push Your Luck Draw
 
 Aba separada (`🍀 Push Your Luck` no seletor de jogo). Estado isolado via
 `usePushYourLuckDrawGame` (`hooks/usePushYourLuckDrawGame.ts`), um
 `useReducer` que recebe qualquer `ServerMessage` cujo `type` comece com
-`pushyourluckdraw_`, mesmo padrão do Go Fish/Canastra/Truco.
+`pushyourluckdraw_` (roteado no `default:` do switch principal do
+`App.tsx`, mesmo padrão do Truco/Gaúcho/Canastra).
 
 - `PushYourLuckDrawLobby.tsx` — criar/listar mesas (nome, máximo de
-  jogadores 2-8, pontuação-alvo padrão 150, modo de baralho fresco/persistente).
+  jogadores 2-8, pontuação-alvo padrão 150).
 - `PushYourLuckDrawTable.tsx` — mesa: placar total de todos, jogador da
   vez em destaque, **mão da rodada de cada jogador visível** (é o único
   jogo do catálogo sem mão privada), Coringas guardados por jogador,
-  botões Pedir carta/Parar na minha vez, contador de cartas no monte,
-  overlay de fim de rodada e fim de partida/revanche. Usa um wrapper local
-  (`PushYourLuckDrawCardFace`, mesmo padrão do `CanastraCardFace`) que cai
-  pro `PlayingCard` comum quando a carta não é um coringa.
+  botões Pedir carta/Parar/Jogar-`@` na minha vez, contador de cartas no
+  monte, overlay de fim de rodada e fim de partida/revanche. Usa um
+  wrapper local (`PushYourLuckDrawCardFace`, mesmo padrão do
+  `CanastraCardFace`) que cai pro `PlayingCard` comum quando a carta não é
+  um coringa nem um `@`.
 - `PushYourLuckDrawGuide.tsx` — painel de regras (reutiliza o shell CSS
   `.hand-guide-*` do `HandGuide.tsx`).
 
 **Cartas:** usa `PushYourLuckDrawCard` (não `Card`) — tem `id` único (muitos
-ranks têm cópias duplicadas) e `suit`/`rank` nuláveis pro coringa, mesmo
+ranks têm cópias duplicadas) e `suit`/`rank` nuláveis pro coringa/`@`, mesmo
 formato do `CanastraCard`.
 
 ## Observabilidade (Front)

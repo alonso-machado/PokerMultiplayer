@@ -1,4 +1,4 @@
-import type { Card, CanastraMeldPlan, CanastraRoomConfig, ClientMessage, GauchoRoomConfig, GoFishRoomConfig, PlayerAction, PushYourLuckDrawRoomConfig, Rank, RoomConfig, Suit, TrucoRoomConfig } from '../../shared/types'
+import type { Card, CanastraMeldPlan, CanastraRoomConfig, ClientMessage, GauchoRoomConfig, PlayerAction, PushYourLuckDrawRoomConfig, Rank, RoomConfig, Suit, TrucoRoomConfig } from '../../shared/types'
 // Blackjack has no room config to validate — see blackjack_join below.
 
 const MAX_PAYLOAD_BYTES = 512
@@ -10,7 +10,7 @@ const VALID_TRUCO_MODES = new Set<string>(['1x1', '2x2'])
 const VALID_MANILHA_VARIANTS = new Set<string>(['vira', 'fixed'])
 const VALID_GAUCHO_MODES = new Set<string>(['1x1', '2x2'])
 const VALID_CANASTRA_MODES = new Set<string>(['1x1', '2x2'])
-const VALID_DECK_MODES = new Set<string>(['fresh', 'persistent'])
+const VALID_JOKER_MODES = new Set<string>(['fixed', 'per_player'])
 
 function isString(v: unknown): v is string   { return typeof v === 'string' }
 // Signed token: 64-char playerId + '.' + ~43-char base64url HMAC = ~108 chars. Cap at 128.
@@ -69,22 +69,14 @@ function parseCanastraConfig(v: unknown): CanastraRoomConfig | null {
   return { mode: c.mode as CanastraRoomConfig['mode'] }
 }
 
-function parseGoFishConfig(v: unknown): GoFishRoomConfig | null {
-  if (typeof v !== 'object' || v === null) return null
-  const c = v as Record<string, unknown>
-  const maxPlayers = safeInt(c.maxPlayers, 2, 6)
-  if (maxPlayers === null) return null
-  return { maxPlayers }
-}
-
 function parsePushYourLuckDrawConfig(v: unknown): PushYourLuckDrawRoomConfig | null {
   if (typeof v !== 'object' || v === null) return null
   const c = v as Record<string, unknown>
   const maxPlayers = safeInt(c.maxPlayers, 2, 8)
   const targetScore = safeInt(c.targetScore, 50, 2000)
   if (maxPlayers === null || targetScore === null) return null
-  if (!isString(c.deckMode) || !VALID_DECK_MODES.has(c.deckMode)) return null
-  return { maxPlayers, targetScore, deckMode: c.deckMode as PushYourLuckDrawRoomConfig['deckMode'] }
+  if (!isString(c.jokerMode) || !VALID_JOKER_MODES.has(c.jokerMode)) return null
+  return { maxPlayers, targetScore, jokerMode: c.jokerMode as PushYourLuckDrawRoomConfig['jokerMode'] }
 }
 
 function parseIdArray(v: unknown): string[] | null {
@@ -311,32 +303,6 @@ export function parseClientMessage(raw: unknown): ClientMessage | null {
       return { type: 'blackjack_insurance_bet', amount }
     }
 
-    // ── Go Fish ──────────────────────────────────────────────────────────
-    case 'gofish_list_rooms': return { type: 'gofish_list_rooms' }
-    case 'gofish_leave_room': return { type: 'gofish_leave_room' }
-    case 'gofish_start_game': return { type: 'gofish_start_game' }
-
-    case 'gofish_create_room': {
-      if (!isSafeRoomName(m.roomName)) return null
-      const config = parseGoFishConfig(m.config)
-      if (!config) return null
-      return { type: 'gofish_create_room', roomName: m.roomName as string, config }
-    }
-
-    case 'gofish_join_room':
-      if (!isSafeId(m.roomId)) return null
-      return { type: 'gofish_join_room', roomId: m.roomId as string }
-
-    case 'gofish_ask': {
-      if (!isSafeId(m.targetPlayerId)) return null
-      if (!isString(m.rank) || !VALID_RANKS.has(m.rank)) return null
-      return { type: 'gofish_ask', targetPlayerId: m.targetPlayerId, rank: m.rank as Rank }
-    }
-
-    case 'gofish_rematch_vote':
-      if (!isBool(m.accept)) return null
-      return { type: 'gofish_rematch_vote', accept: m.accept }
-
     // ── Push Your Luck Draw ─────────────────────────────────────────────
     case 'pushyourluckdraw_list_rooms': return { type: 'pushyourluckdraw_list_rooms' }
     case 'pushyourluckdraw_leave_room': return { type: 'pushyourluckdraw_leave_room' }
@@ -354,6 +320,11 @@ export function parseClientMessage(raw: unknown): ClientMessage | null {
     case 'pushyourluckdraw_join_room':
       if (!isSafeId(m.roomId)) return null
       return { type: 'pushyourluckdraw_join_room', roomId: m.roomId as string }
+
+    case 'pushyourluckdraw_throw_joker': {
+      if (!isSafeId(m.targetId)) return null
+      return { type: 'pushyourluckdraw_throw_joker', targetId: m.targetId as string }
+    }
 
     case 'pushyourluckdraw_rematch_vote':
       if (!isBool(m.accept)) return null
