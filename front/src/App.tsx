@@ -1,7 +1,7 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { usePostHog } from '@posthog/react'
 import type {
-  BlindLevel, Card, Player, PlayerAction,
+  BlindLevel, Card, LobbyGame, Player, PlayerAction,
   RoomConfig, RoomSummary, ServerMessage, TableState,
   TournamentInfo, TournamentPlayer, TournamentStatus,
 } from '../../shared/types'
@@ -31,7 +31,7 @@ import type { TrucoRoomSummary, GauchoRoomSummary, CanastraRoomSummary, PushYour
 
 interface TurnState { validActions: PlayerAction[]; callAmount: number; minRaise: number }
 interface ShowdownEntry { playerId: string; playerName: string; cards: Card[]; bestCards: Card[]; handName: string; won: number }
-type GameGroup = 'poker' | 'truco' | 'gaucho' | 'canastra' | 'blackjack' | 'pushyourluckdraw'
+type GameGroup = LobbyGame
 type PokerTab = 'rooms' | 'tournament'
 
 const identity = getOrCreateIdentity()
@@ -229,7 +229,17 @@ function AppInner() {
     }
   }, [posthog?.capture, handleTrucoMessage, handleGauchoMessage, handleCanastraMessage, handleBlackjackMessage, handlePushYourLuckDrawMessage])
 
-  const { send } = useSocket(identity, handleMessage)
+  const { send, connected } = useSocket(identity, handleMessage)
+
+  // Tell the server which game's lobby tab is actually open — it scopes
+  // room-list broadcasts to just that one (see LOBBY_TOPICS / set_active_lobby
+  // in server/src/index.ts), so switching away from a tab also stops that
+  // game's lobby updates from reaching this connection. Re-sent on every
+  // (re)connect too, since the server starts each fresh connection with no
+  // active tab recorded.
+  useEffect(() => {
+    if (connected) send({ type: 'set_active_lobby', game: activeGame })
+  }, [activeGame, connected, send])
 
   function setMyName(name: string) {
     setMyNameState(name); saveName(name); identity.name = name
@@ -435,9 +445,9 @@ function AppInner() {
         <button type="button" className={`tab${activeGame === 'poker' ? ' active' : ''}`} onClick={() => setActiveGame('poker')}>♠ Poker</button>
         <button type="button" className={`tab${activeGame === 'truco' ? ' active' : ''}`} onClick={() => setActiveGame('truco')}>🂡 Truco</button>
         <button type="button" className={`tab${activeGame === 'gaucho' ? ' active' : ''}`} onClick={() => setActiveGame('gaucho')}>🧉 Truco Gaúcho</button>
-        <button type="button" className={`tab${activeGame === 'canastra' ? ' active' : ''}`} onClick={() => setActiveGame('canastra')}>🎴 Canastra</button>
-        <button type="button" className={`tab${activeGame === 'blackjack' ? ' active' : ''}`} onClick={() => setActiveGame('blackjack')}>🂡 Blackjack / 21</button>
         <button type="button" className={`tab${activeGame === 'pushyourluckdraw' ? ' active' : ''}`} onClick={() => setActiveGame('pushyourluckdraw')}>🍀 Push Your Luck</button>
+        <button type="button" className={`tab${activeGame === 'blackjack' ? ' active' : ''}`} onClick={() => setActiveGame('blackjack')}>🂡 Blackjack / 21</button>
+        <button type="button" className={`tab${activeGame === 'canastra' ? ' active' : ''}`} onClick={() => setActiveGame('canastra')}>🎴 Canastra</button>
       </div>
 
       {activeGame === 'poker' && (

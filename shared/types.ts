@@ -46,6 +46,11 @@ export interface TableState {
 
 // ─── Lobby ────────────────────────────────────────────────────────────────────
 
+/** One of the six room-based games, used to scope lobby room-list updates to
+ *  whichever one the client is actually looking at — see `set_active_lobby`
+ *  below. */
+export type LobbyGame = 'poker' | 'truco' | 'gaucho' | 'canastra' | 'blackjack' | 'pushyourluckdraw'
+
 export type RoomStatus = 'waiting' | 'playing'
 
 export interface RoomConfig {
@@ -113,6 +118,13 @@ export type ClientMessage =
   // Identity — first message on every connection
   | { type: 'hello'; playerId: string; name: string; tournamentToken?: string }
   | { type: 'set_name'; name: string }
+  /** Tells the server which game's lobby the client is currently looking at
+   *  (e.g. on switching tabs) — the server subscribes this connection to
+   *  just that game's room-list broadcasts (unsubscribing from the other
+   *  five) and replies with a fresh snapshot. Send it once a game's UI is
+   *  actually being shown; a player already seated in that game's room
+   *  doesn't need its lobby updates regardless of which tab is active. */
+  | { type: 'set_active_lobby'; game: LobbyGame }
   // Lobby
   | { type: 'list_rooms' }
   | { type: 'create_room'; roomName: string; config: RoomConfig }

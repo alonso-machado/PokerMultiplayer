@@ -1,4 +1,4 @@
-import type { Card, CanastraMeldPlan, CanastraRoomConfig, ClientMessage, GauchoRoomConfig, PlayerAction, PushYourLuckDrawRoomConfig, Rank, RoomConfig, Suit, TrucoRoomConfig } from '../../shared/types'
+import type { Card, CanastraMeldPlan, CanastraRoomConfig, ClientMessage, GauchoRoomConfig, LobbyGame, PlayerAction, PushYourLuckDrawRoomConfig, Rank, RoomConfig, Suit, TrucoRoomConfig } from '../../shared/types'
 // Blackjack has no room config to validate — see blackjack_join below.
 
 const MAX_PAYLOAD_BYTES = 512
@@ -11,6 +11,7 @@ const VALID_MANILHA_VARIANTS = new Set<string>(['vira', 'fixed'])
 const VALID_GAUCHO_MODES = new Set<string>(['1x1', '2x2'])
 const VALID_CANASTRA_MODES = new Set<string>(['1x1', '2x2'])
 const VALID_JOKER_MODES = new Set<string>(['fixed', 'per_player'])
+const VALID_LOBBY_GAMES = new Set<string>(['poker', 'truco', 'gaucho', 'canastra', 'blackjack', 'pushyourluckdraw'])
 
 function isString(v: unknown): v is string   { return typeof v === 'string' }
 // Signed token: 64-char playerId + '.' + ~43-char base64url HMAC = ~108 chars. Cap at 128.
@@ -129,6 +130,10 @@ export function parseClientMessage(raw: unknown): ClientMessage | null {
     case 'set_name':
       if (!isSafeName(m.name)) return null
       return { type: 'set_name', name: m.name }
+
+    case 'set_active_lobby':
+      if (!isString(m.game) || !VALID_LOBBY_GAMES.has(m.game)) return null
+      return { type: 'set_active_lobby', game: m.game as LobbyGame }
 
     case 'list_rooms':        return { type: 'list_rooms' }
     case 'leave_room':        return { type: 'leave_room' }

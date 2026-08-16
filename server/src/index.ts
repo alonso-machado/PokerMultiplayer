@@ -3,7 +3,7 @@
 import { startTelemetry, shutdownTelemetry } from './telemetry'
 startTelemetry()
 
-import type { ClientMessage, ServerMessage } from '../../shared/types'
+import type { ClientMessage, LobbyGame, ServerMessage } from '../../shared/types'
 import { parseClientMessage } from './validation'
 import { issueToken, verifyToken, newPlayerId } from './identity'
 import { openapiSpec, swaggerUiHtml } from './openapi'
@@ -21,6 +21,39 @@ import { Tournament } from './tournament'
 import { adminRouter, publicTournamentHandler } from './admin'
 
 const MAX_LOBBY_ROOMS = Number(process.env.MAX_LOBBIES ?? 30)
+
+/** Per-game lobby pub/sub topics. Every connection starts subscribed to all
+ *  six (so an idle/browsing client sees every game's live room list — same
+ *  as the snapshot already sent in open() below), then unsubscribes from a
+ *  specific game's topic the moment it's seated in that game (create/join)
+ *  and resubscribes on leaving.
+ *
+ *  Before this, every room-list broadcast (`server.publish('lobby', ...)`)
+ *  went out on one shared topic that nobody ever unsubscribed from — so
+ *  every create_room/join_room, for any table, went to every connected
+ *  socket including players already deep in an unrelated match. Under a
+ *  load test with ~200 concurrent Push Your Luck Draw tables this was the
+ *  single largest source of outbound traffic (a growing room-list resent to
+ *  hundreds of sockets on every single join). Splitting into per-game
+ *  topics keeps each broadcast scoped to players who can actually act on it.
+ *
+ *  `tournament_info` deliberately stays on the shared 'lobby' topic below —
+ *  a tournament starting is relevant to everyone, seated or not.
+ *
+ *  Scope note: the one path that doesn't re-sync a subscription is a
+ *  tournament kicking off and pulling already-connected players out of a
+ *  lobby room server-side (see the tournament `start` admin callback) — that
+ *  leaves their poker-lobby subscription stale until their next reconnect.
+ *  Rare (once per tournament start) and harmless (just a few extra bytes),
+ *  not worth the extra plumbing to chase down their live socket from there. */
+const LOBBY_TOPICS = {
+  poker: 'lobby:poker',
+  truco: 'lobby:truco',
+  gaucho: 'lobby:gaucho',
+  canastra: 'lobby:canastra',
+  blackjack: 'lobby:blackjack',
+  pushyourluckdraw: 'lobby:pushyourluckdraw',
+} as const
 
 const rooms = new Map<string, Room>()
 const trucoRooms = new Map<string, TrucoRoom>()
@@ -55,6 +88,11 @@ interface Session {
   blackjackRoomId: string | null
   pushyourluckdrawRoomId: string | null
   tournamentToken: string | null
+  /** Which game's lobby tab the client currently has open — see
+   *  `set_active_lobby` / syncLobbySubscription() below. Purely a live UI
+   *  signal from the client, so it isn't persisted across reconnects; the
+   *  front resends it the moment it (re)connects. */
+  activeLobbyTab: LobbyGame | null
 }
 
 function generateId(): string { return randomId(9) }
@@ -211,7 +249,7 @@ const server = Bun.serve<Session>({
 
     if (pathname === '/ws') {
       const ok = server.upgrade(req, {
-        data: { playerId: '', name: 'Jogador', roomId: null, trucoRoomId: null, gauchoRoomId: null, canastraRoomId: null, blackjackRoomId: null, pushyourluckdrawRoomId: null, tournamentToken: null } as Session,
+        data: { playerId: '', name: 'Jogador', roomId: null, trucoRoomId: null, gauchoRoomId: null, canastraRoomId: null, blackjackRoomId: null, pushyourluckdrawRoomId: null, tournamentToken: null, activeLobbyTab: null } as Session,
       })
       return ok ? undefined : new Response('Upgrade failed', { status: 400 })
     }
@@ -236,11 +274,14 @@ const server = Bun.serve<Session>({
 
   websocket: {
     open(ws) {
-      // Subscribe so broadcastRoomList()/broadcastTournamentInfo() (server.publish('lobby', ...))
-      // reach this socket — without this, clients only see lobby/tournament updates
-      // pushed at connect time and never learn about a newly-created tournament
-      // until they reload (new `hello` -> fresh tournament_info send).
+      // Subscribe so broadcastTournamentInfo() (server.publish('lobby', ...)) reaches
+      // this socket — without this, clients only see tournament updates pushed at
+      // connect time and never learn about a newly-created tournament until they
+      // reload (new `hello` -> fresh tournament_info send). Also start subscribed to
+      // every per-game room-list topic (see LOBBY_TOPICS) — narrowed down to just the
+      // games this connection isn't seated in once `hello` restores its session below.
       ws.subscribe('lobby')
+      for (const topic of Object.values(LOBBY_TOPICS)) ws.subscribe(topic)
       send(ws, { type: 'room_list', rooms: lobbyRoomList() })
       send(ws, { type: 'truco_room_list', rooms: trucoRoomList() })
       send(ws, { type: 'gaucho_room_list', rooms: gauchoRoomList() })
@@ -366,6 +407,13 @@ const server = Bun.serve<Session>({
             emit({ type: 'tournament_unregistered' })
           }
         }
+
+        // `activeLobbyTab` starts null on every fresh connection (reconnects
+        // included — see the Session field doc) — this narrows subscriptions
+        // down to just whichever games this session came back seated in
+        // (none, right now) until the client's own `set_active_lobby`
+        // arrives a moment later with its real active tab.
+        syncLobbySubscription(ws, session, session.activeLobbyTab)
         return
       }
 
@@ -383,6 +431,12 @@ const server = Bun.serve<Session>({
         case 'list_rooms':     emit({ type: 'room_list', rooms: lobbyRoomList() }); break
         case 'get_tournament': emit({ type: 'tournament_info', tournament: activeTournament?.info() ?? null }); break
 
+        // ── Active lobby tab (see LOBBY_TOPICS / syncLobbySubscription) ─────
+        case 'set_active_lobby':
+          syncLobbySubscription(ws, session, msg.game)
+          emit(lobbySnapshotFor(msg.game))
+          break
+
         // ── Create lobby room ───────────────────────────────────────────────
         case 'create_room': {
           if (lobbyRoomCount() >= MAX_LOBBY_ROOMS) {
@@ -395,6 +449,7 @@ const server = Bun.serve<Session>({
           room.join(session.playerId, session.name, emit)   // creator auto-joins
           session.roomId = room.id
           setPersistentRoom(session.playerId, room.id)
+          syncLobbySubscription(ws, session, session.activeLobbyTab)
           broadcastRoomList()
           break
         }
@@ -409,6 +464,7 @@ const server = Bun.serve<Session>({
           room.join(session.playerId, session.name, emit)
           session.roomId = room.id
           setPersistentRoom(session.playerId, room.id)
+          syncLobbySubscription(ws, session, session.activeLobbyTab)
           broadcastRoomList()
           break
         }
@@ -472,6 +528,7 @@ const server = Bun.serve<Session>({
           room.join(session.playerId, session.name, emit)   // creator auto-joins
           session.trucoRoomId = room.id
           setPersistentTrucoRoom(session.playerId, room.id)
+          syncLobbySubscription(ws, session, session.activeLobbyTab)
           broadcastTrucoRoomList()
           break
         }
@@ -485,6 +542,7 @@ const server = Bun.serve<Session>({
           room.join(session.playerId, session.name, emit)
           session.trucoRoomId = room.id
           setPersistentTrucoRoom(session.playerId, room.id)
+          syncLobbySubscription(ws, session, session.activeLobbyTab)
           broadcastTrucoRoomList()
           break
         }
@@ -536,6 +594,7 @@ const server = Bun.serve<Session>({
           room.join(session.playerId, session.name, emit)   // creator auto-joins
           session.gauchoRoomId = room.id
           setPersistentGauchoRoom(session.playerId, room.id)
+          syncLobbySubscription(ws, session, session.activeLobbyTab)
           broadcastGauchoRoomList()
           break
         }
@@ -549,6 +608,7 @@ const server = Bun.serve<Session>({
           room.join(session.playerId, session.name, emit)
           session.gauchoRoomId = room.id
           setPersistentGauchoRoom(session.playerId, room.id)
+          syncLobbySubscription(ws, session, session.activeLobbyTab)
           broadcastGauchoRoomList()
           break
         }
@@ -624,6 +684,7 @@ const server = Bun.serve<Session>({
           room.join(session.playerId, session.name, emit)   // creator auto-joins
           session.canastraRoomId = room.id
           setPersistentCanastraRoom(session.playerId, room.id)
+          syncLobbySubscription(ws, session, session.activeLobbyTab)
           broadcastCanastraRoomList()
           break
         }
@@ -637,6 +698,7 @@ const server = Bun.serve<Session>({
           room.join(session.playerId, session.name, emit)
           session.canastraRoomId = room.id
           setPersistentCanastraRoom(session.playerId, room.id)
+          syncLobbySubscription(ws, session, session.activeLobbyTab)
           broadcastCanastraRoomList()
           break
         }
@@ -689,6 +751,7 @@ const server = Bun.serve<Session>({
           room.join(session.playerId, session.name, emit)
           session.blackjackRoomId = room.id
           setPersistentBlackjackRoom(session.playerId, room.id)
+          syncLobbySubscription(ws, session, session.activeLobbyTab)
           break
         }
 
@@ -745,6 +808,7 @@ const server = Bun.serve<Session>({
           room.join(session.playerId, session.name, emit)   // creator auto-joins
           session.pushyourluckdrawRoomId = room.id
           setPersistentPushYourLuckDrawRoom(session.playerId, room.id)
+          syncLobbySubscription(ws, session, session.activeLobbyTab)
           broadcastPushYourLuckDrawRoomList()
           break
         }
@@ -759,6 +823,7 @@ const server = Bun.serve<Session>({
           room.join(session.playerId, session.name, emit)
           session.pushyourluckdrawRoomId = room.id
           setPersistentPushYourLuckDrawRoom(session.playerId, room.id)
+          syncLobbySubscription(ws, session, session.activeLobbyTab)
           broadcastPushYourLuckDrawRoomList()
           break
         }
@@ -845,7 +910,7 @@ const server = Bun.serve<Session>({
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function leaveRoom(ws: { data: Session }): void {
+function leaveRoom(ws: { data: Session; subscribe: (topic: string) => void; unsubscribe: (topic: string) => void }): void {
   const { playerId, roomId } = ws.data
   if (!roomId) return
   const room = rooms.get(roomId)
@@ -855,6 +920,7 @@ function leaveRoom(ws: { data: Session }): void {
   }
   ws.data.roomId = null
   setPersistentRoom(playerId, null)
+  syncLobbySubscription(ws, ws.data, ws.data.activeLobbyTab)
   broadcastRoomList()
 }
 
@@ -863,7 +929,7 @@ function setPersistentRoom(pid: string, roomId: string | null): void {
   if (ps) ps.roomId = roomId
 }
 
-function leaveTrucoRoom(ws: { data: Session }): void {
+function leaveTrucoRoom(ws: { data: Session; subscribe: (topic: string) => void; unsubscribe: (topic: string) => void }): void {
   const { playerId, trucoRoomId } = ws.data
   if (!trucoRoomId) return
   const room = trucoRooms.get(trucoRoomId)
@@ -873,6 +939,7 @@ function leaveTrucoRoom(ws: { data: Session }): void {
   }
   ws.data.trucoRoomId = null
   setPersistentTrucoRoom(playerId, null)
+  syncLobbySubscription(ws, ws.data, ws.data.activeLobbyTab)
   broadcastTrucoRoomList()
 }
 
@@ -881,7 +948,7 @@ function setPersistentTrucoRoom(pid: string, trucoRoomId: string | null): void {
   if (ps) ps.trucoRoomId = trucoRoomId
 }
 
-function leaveGauchoRoom(ws: { data: Session }): void {
+function leaveGauchoRoom(ws: { data: Session; subscribe: (topic: string) => void; unsubscribe: (topic: string) => void }): void {
   const { playerId, gauchoRoomId } = ws.data
   if (!gauchoRoomId) return
   const room = gauchoRooms.get(gauchoRoomId)
@@ -891,6 +958,7 @@ function leaveGauchoRoom(ws: { data: Session }): void {
   }
   ws.data.gauchoRoomId = null
   setPersistentGauchoRoom(playerId, null)
+  syncLobbySubscription(ws, ws.data, ws.data.activeLobbyTab)
   broadcastGauchoRoomList()
 }
 
@@ -899,7 +967,7 @@ function setPersistentGauchoRoom(pid: string, gauchoRoomId: string | null): void
   if (ps) ps.gauchoRoomId = gauchoRoomId
 }
 
-function leaveCanastraRoom(ws: { data: Session }): void {
+function leaveCanastraRoom(ws: { data: Session; subscribe: (topic: string) => void; unsubscribe: (topic: string) => void }): void {
   const { playerId, canastraRoomId } = ws.data
   if (!canastraRoomId) return
   const room = canastraRooms.get(canastraRoomId)
@@ -909,6 +977,7 @@ function leaveCanastraRoom(ws: { data: Session }): void {
   }
   ws.data.canastraRoomId = null
   setPersistentCanastraRoom(playerId, null)
+  syncLobbySubscription(ws, ws.data, ws.data.activeLobbyTab)
   broadcastCanastraRoomList()
 }
 
@@ -917,7 +986,7 @@ function setPersistentCanastraRoom(pid: string, canastraRoomId: string | null): 
   if (ps) ps.canastraRoomId = canastraRoomId
 }
 
-function leaveBlackjackRoom(ws: { data: Session }): void {
+function leaveBlackjackRoom(ws: { data: Session; subscribe: (topic: string) => void; unsubscribe: (topic: string) => void }): void {
   const { playerId, blackjackRoomId } = ws.data
   if (!blackjackRoomId) return
   const room = blackjackRooms.get(blackjackRoomId)
@@ -927,6 +996,9 @@ function leaveBlackjackRoom(ws: { data: Session }): void {
   }
   ws.data.blackjackRoomId = null
   setPersistentBlackjackRoom(playerId, null)
+  // Harmless even when called from close() with the socket already going
+  // away (see close() below) — subscribe/unsubscribe on a dead socket is a no-op.
+  syncLobbySubscription(ws, ws.data, ws.data.activeLobbyTab)
 }
 
 function setPersistentBlackjackRoom(pid: string, blackjackRoomId: string | null): void {
@@ -934,7 +1006,7 @@ function setPersistentBlackjackRoom(pid: string, blackjackRoomId: string | null)
   if (ps) ps.blackjackRoomId = blackjackRoomId
 }
 
-function leavePushYourLuckDrawRoom(ws: { data: Session }): void {
+function leavePushYourLuckDrawRoom(ws: { data: Session; subscribe: (topic: string) => void; unsubscribe: (topic: string) => void }): void {
   const { playerId, pushyourluckdrawRoomId } = ws.data
   if (!pushyourluckdrawRoomId) return
   const room = pushyourluckdrawRooms.get(pushyourluckdrawRoomId)
@@ -944,6 +1016,7 @@ function leavePushYourLuckDrawRoom(ws: { data: Session }): void {
   }
   ws.data.pushyourluckdrawRoomId = null
   setPersistentPushYourLuckDrawRoom(playerId, null)
+  syncLobbySubscription(ws, ws.data, ws.data.activeLobbyTab)
   broadcastPushYourLuckDrawRoomList()
 }
 
@@ -953,7 +1026,7 @@ function leavePushYourLuckDrawRoom(ws: { data: Session }): void {
  *  game) is deliberate: they're actually gone from `room.players` now, so a
  *  later `hello` must NOT auto-reconnect them — it should land them back in
  *  the lobby, where re-joining the same room restores their score. */
-function disconnectPushYourLuckDrawPlayer(ws: { data: Session }): void {
+function disconnectPushYourLuckDrawPlayer(ws: { data: Session; subscribe: (topic: string) => void; unsubscribe: (topic: string) => void }): void {
   const { playerId, pushyourluckdrawRoomId } = ws.data
   if (!pushyourluckdrawRoomId) return
   const room = pushyourluckdrawRooms.get(pushyourluckdrawRoomId)
@@ -963,6 +1036,9 @@ function disconnectPushYourLuckDrawPlayer(ws: { data: Session }): void {
   }
   ws.data.pushyourluckdrawRoomId = null
   setPersistentPushYourLuckDrawRoom(playerId, null)
+  // Called from close() — the socket's already going away, so this is a
+  // harmless no-op, kept only for consistency with leavePushYourLuckDrawRoom().
+  syncLobbySubscription(ws, ws.data, ws.data.activeLobbyTab)
   broadcastPushYourLuckDrawRoomList()
 }
 
@@ -984,19 +1060,19 @@ function canastraRoomList() { return [...canastraRooms.values()].map(r => r.summ
 function pushyourluckdrawRoomList() { return [...pushyourluckdrawRooms.values()].map(r => r.summary()) }
 
 function broadcastRoomList(): void {
-  server.publish('lobby', JSON.stringify({ type: 'room_list', rooms: lobbyRoomList() } satisfies ServerMessage))
+  server.publish(LOBBY_TOPICS.poker, JSON.stringify({ type: 'room_list', rooms: lobbyRoomList() } satisfies ServerMessage))
 }
 function broadcastTrucoRoomList(): void {
-  server.publish('lobby', JSON.stringify({ type: 'truco_room_list', rooms: trucoRoomList() } satisfies ServerMessage))
+  server.publish(LOBBY_TOPICS.truco, JSON.stringify({ type: 'truco_room_list', rooms: trucoRoomList() } satisfies ServerMessage))
 }
 function broadcastGauchoRoomList(): void {
-  server.publish('lobby', JSON.stringify({ type: 'gaucho_room_list', rooms: gauchoRoomList() } satisfies ServerMessage))
+  server.publish(LOBBY_TOPICS.gaucho, JSON.stringify({ type: 'gaucho_room_list', rooms: gauchoRoomList() } satisfies ServerMessage))
 }
 function broadcastCanastraRoomList(): void {
-  server.publish('lobby', JSON.stringify({ type: 'canastra_room_list', rooms: canastraRoomList() } satisfies ServerMessage))
+  server.publish(LOBBY_TOPICS.canastra, JSON.stringify({ type: 'canastra_room_list', rooms: canastraRoomList() } satisfies ServerMessage))
 }
 function broadcastPushYourLuckDrawRoomList(): void {
-  server.publish('lobby', JSON.stringify({ type: 'pushyourluckdraw_room_list', rooms: pushyourluckdrawRoomList() } satisfies ServerMessage))
+  server.publish(LOBBY_TOPICS.pushyourluckdraw, JSON.stringify({ type: 'pushyourluckdraw_room_list', rooms: pushyourluckdrawRoomList() } satisfies ServerMessage))
 }
 function blackjackLobbyStats(): { tableCount: number; playerCount: number } {
   let playerCount = 0
@@ -1004,7 +1080,49 @@ function blackjackLobbyStats(): { tableCount: number; playerCount: number } {
   return { tableCount: blackjackRooms.size, playerCount }
 }
 function broadcastBlackjackLobbyStats(): void {
-  server.publish('lobby', JSON.stringify({ type: 'blackjack_lobby_stats', ...blackjackLobbyStats() } satisfies ServerMessage))
+  server.publish(LOBBY_TOPICS.blackjack, JSON.stringify({ type: 'blackjack_lobby_stats', ...blackjackLobbyStats() } satisfies ServerMessage))
+}
+
+function isSeatedIn(session: Session, game: LobbyGame): boolean {
+  switch (game) {
+    case 'poker':            return session.roomId !== null
+    case 'truco':             return session.trucoRoomId !== null
+    case 'gaucho':            return session.gauchoRoomId !== null
+    case 'canastra':          return session.canastraRoomId !== null
+    case 'blackjack':         return session.blackjackRoomId !== null
+    case 'pushyourluckdraw':  return session.pushyourluckdrawRoomId !== null
+  }
+}
+
+function lobbySnapshotFor(game: LobbyGame): ServerMessage {
+  switch (game) {
+    case 'poker':            return { type: 'room_list', rooms: lobbyRoomList() }
+    case 'truco':             return { type: 'truco_room_list', rooms: trucoRoomList() }
+    case 'gaucho':            return { type: 'gaucho_room_list', rooms: gauchoRoomList() }
+    case 'canastra':          return { type: 'canastra_room_list', rooms: canastraRoomList() }
+    case 'blackjack':         return { type: 'blackjack_lobby_stats', ...blackjackLobbyStats() }
+    case 'pushyourluckdraw':  return { type: 'pushyourluckdraw_room_list', rooms: pushyourluckdrawRoomList() }
+  }
+}
+
+/** Single source of truth for a connection's lobby subscriptions — records
+ *  `game` as the session's active lobby tab, then subscribes to just that
+ *  one topic (skipped if the player is already seated in that specific
+ *  game's room — they need its live table updates, not its lobby list) and
+ *  unsubscribes from the other five. Called both from `set_active_lobby`
+ *  (tab switches) and from every join/create/leave handler below (seating
+ *  changes) — either kind of change can flip whether the *current* tab's
+ *  subscription should be on. */
+function syncLobbySubscription(
+  ws: { subscribe: (topic: string) => void; unsubscribe: (topic: string) => void },
+  session: Session,
+  game: LobbyGame | null,
+): void {
+  session.activeLobbyTab = game
+  for (const key of Object.keys(LOBBY_TOPICS) as LobbyGame[]) {
+    if (key === game && !isSeatedIn(session, key)) ws.subscribe(LOBBY_TOPICS[key])
+    else ws.unsubscribe(LOBBY_TOPICS[key])
+  }
 }
 function broadcastTournamentInfo(): void {
   server.publish('lobby', JSON.stringify({ type: 'tournament_info', tournament: activeTournament?.info() ?? null } satisfies ServerMessage))

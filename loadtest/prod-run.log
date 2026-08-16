@@ -1,0 +1,167 @@
+
+         /\      Grafana   /‾‾/  
+    /\  /  \     |\  __   /  /   
+   /  \/    \    | |/ /  /   ‾‾\ 
+  /          \   |   (  |  (‾)  |
+ / __________ \  |_|\_\  \_____/ 
+
+     execution: local
+        script: loadtest/pushyourluckdraw-loadtest.js
+        output: -
+
+     scenarios: (100.00%) 2 scenarios, 54 max VUs, 5m25s max duration (incl. graceful stop):
+              * base_tables: 4 looping VUs for 5m20s (exec: runTable, gracefulStop: 5s)
+              * scaling_tables: Up to 50 looping VUs for 3m20s over 50 stages (gracefulRampDown: 5s, exec: runTable, startTime: 10s, gracefulStop: 5s)
+
+
+running (0m01.0s), 04/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   0% ] 4 VUs    0m01.0s/5m20s
+scaling_tables • [   0% ] waiting  09.0s
+
+running (0m02.0s), 04/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   1% ] 4 VUs    0m02.0s/5m20s
+scaling_tables • [   0% ] waiting  08.0s
+
+running (0m03.0s), 04/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   1% ] 4 VUs    0m03.0s/5m20s
+scaling_tables • [   0% ] waiting  07.0s
+
+running (0m04.0s), 04/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   1% ] 4 VUs    0m04.0s/5m20s
+scaling_tables • [   0% ] waiting  06.0s
+
+running (0m05.0s), 04/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   2% ] 4 VUs    0m05.0s/5m20s
+scaling_tables • [   0% ] waiting  05.0s
+
+running (0m06.0s), 04/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   2% ] 4 VUs    0m06.0s/5m20s
+scaling_tables • [   0% ] waiting  04.0s
+
+running (0m07.0s), 04/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   2% ] 4 VUs    0m07.0s/5m20s
+scaling_tables • [   0% ] waiting  03.0s
+
+running (0m08.0s), 04/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   2% ] 4 VUs    0m08.0s/5m20s
+scaling_tables • [   0% ] waiting  02.0s
+
+running (0m09.0s), 04/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   3% ] 4 VUs    0m09.0s/5m20s
+scaling_tables • [   0% ] waiting  01.0s
+
+running (0m10.0s), 04/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   3% ] 4 VUs    0m10.0s/5m20s
+scaling_tables • [   0% ] waiting  00.0s
+
+running (0m11.0s), 04/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   3% ] 4 VUs      0m11.0s/5m20s
+scaling_tables   [   0% ] 00/50 VUs  0m01.0s/3m20.0s
+
+running (0m12.0s), 04/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   4% ] 4 VUs      0m12.0s/5m20s
+scaling_tables   [   1% ] 00/50 VUs  0m02.0s/3m20.0s
+
+running (0m13.0s), 04/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   4% ] 4 VUs      0m13.0s/5m20s
+scaling_tables   [   1% ] 00/50 VUs  0m03.0s/3m20.0s
+
+running (0m14.0s), 04/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   4% ] 4 VUs      0m14.0s/5m20s
+scaling_tables   [   2% ] 00/50 VUs  0m04.0s/3m20.0s
+
+running (0m15.0s), 05/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   5% ] 4 VUs      0m15.0s/5m20s
+scaling_tables   [   2% ] 01/50 VUs  0m05.0s/3m20.0s
+
+running (0m16.0s), 05/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   5% ] 4 VUs      0m16.0s/5m20s
+scaling_tables   [   3% ] 01/50 VUs  0m06.0s/3m20.0s
+
+running (0m17.0s), 05/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   5% ] 4 VUs      0m17.0s/5m20s
+scaling_tables   [   3% ] 01/50 VUs  0m07.0s/3m20.0s
+
+running (0m18.0s), 05/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   6% ] 4 VUs      0m18.0s/5m20s
+scaling_tables   [   4% ] 01/50 VUs  0m08.0s/3m20.0s
+
+running (0m19.0s), 06/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   6% ] 4 VUs      0m19.0s/5m20s
+scaling_tables   [   4% ] 02/50 VUs  0m09.0s/3m20.0s
+
+running (0m20.0s), 06/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   6% ] 4 VUs      0m20.0s/5m20s
+scaling_tables   [   5% ] 02/50 VUs  0m10.0s/3m20.0s
+
+running (0m21.0s), 06/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   7% ] 4 VUs      0m21.0s/5m20s
+scaling_tables   [   5% ] 02/50 VUs  0m11.0s/3m20.0s
+
+running (0m22.0s), 06/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   7% ] 4 VUs      0m22.0s/5m20s
+scaling_tables   [   6% ] 02/50 VUs  0m12.0s/3m20.0s
+
+running (0m23.0s), 07/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   7% ] 4 VUs      0m23.0s/5m20s
+scaling_tables   [   6% ] 03/50 VUs  0m13.0s/3m20.0s
+
+running (0m24.0s), 07/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   7% ] 4 VUs      0m24.0s/5m20s
+scaling_tables   [   7% ] 03/50 VUs  0m14.0s/3m20.0s
+
+running (0m25.0s), 07/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   8% ] 4 VUs      0m25.0s/5m20s
+scaling_tables   [   7% ] 03/50 VUs  0m15.0s/3m20.0s
+
+running (0m26.0s), 07/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   8% ] 4 VUs      0m26.0s/5m20s
+scaling_tables   [   8% ] 03/50 VUs  0m16.0s/3m20.0s
+
+running (0m27.0s), 08/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   8% ] 4 VUs      0m27.0s/5m20s
+scaling_tables   [   8% ] 04/50 VUs  0m17.0s/3m20.0s
+
+running (0m28.0s), 08/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   9% ] 4 VUs      0m28.0s/5m20s
+scaling_tables   [   9% ] 04/50 VUs  0m18.0s/3m20.0s
+
+running (0m29.0s), 08/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   9% ] 4 VUs      0m29.0s/5m20s
+scaling_tables   [   9% ] 04/50 VUs  0m19.0s/3m20.0s
+
+running (0m30.0s), 08/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [   9% ] 4 VUs      0m30.0s/5m20s
+scaling_tables   [  10% ] 04/50 VUs  0m20.0s/3m20.0s
+
+running (0m31.0s), 09/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [  10% ] 4 VUs      0m31.0s/5m20s
+scaling_tables   [  10% ] 05/50 VUs  0m21.0s/3m20.0s
+
+running (0m32.0s), 09/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [  10% ] 4 VUs      0m32.0s/5m20s
+scaling_tables   [  11% ] 05/50 VUs  0m22.0s/3m20.0s
+
+running (0m33.0s), 09/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [  10% ] 4 VUs      0m33.0s/5m20s
+scaling_tables   [  11% ] 05/50 VUs  0m23.0s/3m20.0s
+
+running (0m34.0s), 09/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [  11% ] 4 VUs      0m34.0s/5m20s
+scaling_tables   [  12% ] 05/50 VUs  0m24.0s/3m20.0s
+
+running (0m35.0s), 10/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [  11% ] 4 VUs      0m35.0s/5m20s
+scaling_tables   [  12% ] 06/50 VUs  0m25.0s/3m20.0s
+
+running (0m36.0s), 10/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [  11% ] 4 VUs      0m36.0s/5m20s
+scaling_tables   [  13% ] 06/50 VUs  0m26.0s/3m20.0s
+
+running (0m37.0s), 10/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [  12% ] 4 VUs      0m37.0s/5m20s
+scaling_tables   [  13% ] 06/50 VUs  0m27.0s/3m20.0s
+
+running (0m38.0s), 10/54 VUs, 0 complete and 0 interrupted iterations
+base_tables      [  12% ] 4 VUs      0m38.0s/5m20s
+scaling_tables   [  14% ] 06/50 VUs  0m28.0s/3m20.0s
