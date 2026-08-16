@@ -21,8 +21,6 @@ import { Tournament } from './tournament'
 import { adminRouter, publicTournamentHandler } from './admin'
 import { gameMetrics, serverStartedAt } from './metrics'
 
-const MAX_LOBBY_ROOMS = Number(process.env.MAX_LOBBIES ?? 30)
-
 // ── Per-connection message rate limit ──────────────────────────────────────
 // Cheap, blanket protection against a client (buggy or malicious) hammering
 // any message type — deliberately not type-specific, so it can't be bypassed
@@ -36,6 +34,95 @@ const MAX_LOBBY_ROOMS = Number(process.env.MAX_LOBBIES ?? 30)
 const RATE_LIMIT_ENABLED = process.env.RATE_LIMIT_ENABLED !== 'false'
 const MAX_MESSAGES_PER_WINDOW = Number(process.env.WS_MAX_MSGS_PER_SEC ?? 30)
 const MESSAGE_WINDOW_MS = 1000
+
+// ── Per-IP message rate limit ───────────────────────────────────────────────
+// Same shape as the per-connection budget above, but keyed by IP — closes the
+// gap where a single actor opens many sockets from one IP, each individually
+// staying under its own 30/sec budget while the IP as a whole hammers the
+// server. Deliberately set well above the per-connection cap, not equal to
+// or below it: a household/office NAT — or our own loadtest box, which opens
+// many bot connections from one machine — legitimately runs several real
+// connections that are each entitled to their own full per-connection
+// budget. This is a ceiling on top of that, not a per-player throttle; it
+// only trips once combined traffic from one IP looks like more simultaneous
+// connections than any real use case needs. Same RATE_LIMIT_ENABLED flag as
+// every other WS rate limit here.
+const MAX_MESSAGES_PER_IP_WINDOW = Number(process.env.WS_MAX_MSGS_PER_SEC_PER_IP ?? 100)
+const ipMsgBuckets = new Map<string, { count: number; resetAt: number }>()
+
+function ipMsgLimited(ip: string): boolean {
+  const now = Date.now()
+  const entry = ipMsgBuckets.get(ip)
+  if (!entry || now > entry.resetAt) {
+    ipMsgBuckets.set(ip, { count: 1, resetAt: now + MESSAGE_WINDOW_MS })
+    return false
+  }
+  entry.count++
+  return entry.count > MAX_MESSAGES_PER_IP_WINDOW
+}
+
+// ── Room-creation rate limit (stricter, two-dimensional) ───────────────────
+// create_room (poker + truco/gaucho/canastra/pushyourluckdraw) used to be
+// guarded by a flat MAX_LOBBY_ROOMS cap on *poker only* — every other game
+// had no protection at all, and a numeric cap on concurrent rooms doesn't
+// stop churn (create, abandon, repeat). Creating a room is also strictly
+// heavier than a normal play action: it allocates a Room with its own
+// lifecycle timers that stays alive until it empties or expires (see
+// room.ts), so it gets its own budget on top of the general one above,
+// enforced on two axes:
+//  - per connection (createCount/createWindowResetAt on Session) — stops one
+//    socket from hammering create_room.
+//  - per IP (ipCreateBuckets, keyed by resolveClientIp()) — stops the same
+//    actor from routing around the per-connection cap by opening several
+//    sockets, the same gap the old per-connection-only message limiter had.
+// A minute-long window (vs. the 1s window above) because creation is rare
+// for a real player but the cost per creation is high — a handful of minutes
+// of unchecked creates is already enough Room objects + timers to matter.
+const MAX_CREATES_PER_CONN = Number(process.env.WS_MAX_CREATES_PER_CONN ?? 5)
+const MAX_CREATES_PER_IP   = Number(process.env.WS_MAX_CREATES_PER_IP ?? 10)
+const CREATE_WINDOW_MS = 60_000
+
+const CREATE_ROOM_TYPES = new Set<ClientMessage['type']>([
+  'create_room', 'truco_create_room', 'gaucho_create_room',
+  'canastra_create_room', 'pushyourluckdraw_create_room',
+])
+
+const ipCreateBuckets = new Map<string, { count: number; resetAt: number }>()
+
+function ipCreateLimited(ip: string): boolean {
+  const now = Date.now()
+  const entry = ipCreateBuckets.get(ip)
+  if (!entry || now > entry.resetAt) {
+    ipCreateBuckets.set(ip, { count: 1, resetAt: now + CREATE_WINDOW_MS })
+    return false
+  }
+  entry.count++
+  return entry.count > MAX_CREATES_PER_IP
+}
+
+// Bounds both IP bucket maps to "IPs seen in the last window", not "every IP
+// that ever connected" — playerSessions (below) has an unbounded-growth
+// shape we already know about; these maps are new, so they don't need to
+// inherit the same issue. A bucket whose window is still running (an
+// actively-hammering IP) keeps getting its resetAt pushed forward by
+// ipMsgLimited()/ipCreateLimited(), so this only ever prunes IPs that have
+// gone quiet — active ones are never mid-sweep candidates.
+setInterval(() => {
+  const now = Date.now()
+  for (const [ip, entry] of ipMsgBuckets) if (now > entry.resetAt) ipMsgBuckets.delete(ip)
+  for (const [ip, entry] of ipCreateBuckets) if (now > entry.resetAt) ipCreateBuckets.delete(ip)
+}, 5 * 60_000)
+
+/** Best-effort real client IP. Render terminates TLS and proxies every
+ *  request, so the raw peer address from `server.requestIP()` is Render's
+ *  proxy, not the player — same reasoning as admin.ts's `clientKey()`.
+ *  Spoofable (a client can send its own X-Forwarded-For), so this is a speed
+ *  bump against casual multi-socket abuse, not an identity guarantee. */
+function resolveClientIp(req: Request, server: { requestIP: (req: Request) => { address: string } | null }): string {
+  return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+    ?? server.requestIP(req)?.address
+    ?? 'unknown'
+}
 
 /** Per-game lobby pub/sub topics. Every connection starts subscribed to all
  *  six (so an idle/browsing client sees every game's live room list — same
@@ -90,8 +177,47 @@ interface PersistentSession {
   blackjackRoomId: string | null
   pushyourluckdrawRoomId: string | null
   tournamentToken: string | null
+  /** Last time this playerId was known alive — set on creation, refreshed on
+   *  every reconnect (`hello`) and on disconnect (`close`). The only thing
+   *  the TTL sweep below reads. */
+  lastSeenAt: number
 }
 const playerSessions = new Map<string, PersistentSession>()
+
+// ── Persistent-session TTL sweep ────────────────────────────────────────────
+// playerSessions never used to be cleared — a guest who closes the tab and
+// never comes back left a permanent entry, growing for as long as the
+// process stays up (which, being in-memory, is otherwise the only bound on
+// it — see .claude/Server.md). A player currently connected is tracked in
+// connectedPlayerIds and is never evicted regardless of lastSeenAt, however
+// long their socket has been open for — this only reaps players who are
+// BOTH disconnected AND have been for the full TTL. Safe to be generous
+// (days, not minutes): the actual Room a stale entry points to already has
+// its own much shorter-lived expiry/rebuy timers (see room.ts et al.), so by
+// the time this fires the entry is almost always already-dead weight, not a
+// working reconnect path we'd be cutting short.
+const PLAYER_SESSION_TTL_MS = Number(process.env.PLAYER_SESSION_TTL_HOURS ?? 48) * 60 * 60 * 1000
+const PLAYER_SESSION_SWEEP_MS = 30 * 60_000
+
+// Reference-counted (not a plain Set) so a player with two tabs open doesn't
+// lose their "connected" status the moment either one closes.
+const connectedCounts = new Map<string, number>()
+function markConnected(pid: string): void {
+  connectedCounts.set(pid, (connectedCounts.get(pid) ?? 0) + 1)
+}
+function markDisconnected(pid: string): void {
+  const n = connectedCounts.get(pid)
+  if (n === undefined) return
+  if (n <= 1) connectedCounts.delete(pid); else connectedCounts.set(pid, n - 1)
+}
+
+setInterval(() => {
+  const now = Date.now()
+  for (const [pid, ps] of playerSessions) {
+    if (connectedCounts.has(pid)) continue
+    if (now - ps.lastSeenAt > PLAYER_SESSION_TTL_MS) playerSessions.delete(pid)
+  }
+}, PLAYER_SESSION_SWEEP_MS)
 
 // ── WS session (ephemeral, per connection) ────────────────────────────────────
 interface Session {
@@ -112,6 +238,13 @@ interface Session {
   /** Rate-limit bucket — see MAX_MESSAGES_PER_WINDOW below. */
   msgCount: number
   msgWindowResetAt: number
+  /** Stricter per-connection bucket just for create_room-type messages — see
+   *  CREATE_ROOM_TYPES below. */
+  createCount: number
+  createWindowResetAt: number
+  /** Best-effort client IP, resolved once at upgrade — see resolveClientIp()
+   *  below. Only used for the per-IP create-room guard. */
+  ip: string
 }
 
 function generateId(): string { return randomId(9) }
@@ -269,8 +402,9 @@ const server = Bun.serve<Session>({
       return new Response(null, { status: 204, headers: cors() })
 
     if (pathname === '/ws') {
+      const ip = resolveClientIp(req, server)
       const ok = server.upgrade(req, {
-        data: { playerId: '', name: 'Jogador', roomId: null, trucoRoomId: null, gauchoRoomId: null, canastraRoomId: null, blackjackRoomId: null, pushyourluckdrawRoomId: null, tournamentToken: null, activeLobbyTab: null, msgCount: 0, msgWindowResetAt: 0 } as Session,
+        data: { playerId: '', name: 'Jogador', roomId: null, trucoRoomId: null, gauchoRoomId: null, canastraRoomId: null, blackjackRoomId: null, pushyourluckdrawRoomId: null, tournamentToken: null, activeLobbyTab: null, msgCount: 0, msgWindowResetAt: 0, createCount: 0, createWindowResetAt: 0, ip } as Session,
       })
       return ok ? undefined : new Response('Upgrade failed', { status: 400 })
     }
@@ -294,6 +428,20 @@ const server = Bun.serve<Session>({
   },
 
   websocket: {
+    // Every real message is <= MAX_PAYLOAD_BYTES (512, see validation.ts) —
+    // 4096 gives comfortable headroom for multi-byte UTF-8 room names/framing
+    // overhead while still sitting ~4000x below Bun's 16MB default, so an
+    // oversized frame gets rejected by Bun itself before message() even runs.
+    maxPayloadLength: Number(process.env.WS_MAX_PAYLOAD_BYTES ?? 4096),
+    // No client-side ping/heartbeat (see front/src/hooks/useSocket.ts) — a
+    // seated, actively-playing connection gets steady traffic anyway (every
+    // broadcast in its room resets this), so a short timeout only reaps
+    // truly-dead half-open sockets (network dropped without a close frame)
+    // faster than Bun's 120s default. A merely-idle browsing tab just
+    // reconnects — useSocket.ts already does that automatically with backoff
+    // and the server resumes its session on the next `hello`.
+    idleTimeout: Number(process.env.WS_IDLE_TIMEOUT_SEC ?? 60),
+
     open(ws) {
       openConnections++
       // Subscribe so broadcastTournamentInfo() (server.publish('lobby', ...)) reaches
@@ -322,11 +470,26 @@ const server = Bun.serve<Session>({
         const now = Date.now()
         if (now > session.msgWindowResetAt) { session.msgWindowResetAt = now + MESSAGE_WINDOW_MS; session.msgCount = 0 }
         session.msgCount++
-        if (session.msgCount > MAX_MESSAGES_PER_WINDOW) return
+        if (session.msgCount > MAX_MESSAGES_PER_WINDOW || ipMsgLimited(session.ip)) return
       }
 
       const msg: ClientMessage | null = parseClientMessage(raw)
       if (!msg) { send(ws, { type: 'error', message: 'Mensagem inválida.' }); return }
+
+      // ── Room-creation rate limit ────────────────────────────────────────
+      // Stricter and separate from the general per-connection budget above —
+      // see CREATE_ROOM_TYPES / MAX_CREATES_PER_CONN / MAX_CREATES_PER_IP.
+      // Silently dropped, same posture as the general limiter above: cheapest
+      // possible rejection, no signal handed back to whoever is probing it.
+      // Gated behind the same RATE_LIMIT_ENABLED flag as the general limiter
+      // above — a loadtest run (see loadtest/) needs every WS rate limit off
+      // at once, not just this one.
+      if (RATE_LIMIT_ENABLED && CREATE_ROOM_TYPES.has(msg.type)) {
+        const now = Date.now()
+        if (now > session.createWindowResetAt) { session.createWindowResetAt = now + CREATE_WINDOW_MS; session.createCount = 0 }
+        session.createCount++
+        if (session.createCount > MAX_CREATES_PER_CONN || ipCreateLimited(session.ip)) return
+      }
 
       const emit = (m: ServerMessage) => send(ws, m)
 
@@ -407,9 +570,10 @@ const server = Bun.serve<Session>({
           }
           // Update send fn
           existing.name = session.name
+          existing.lastSeenAt = Date.now()
           session.tournamentToken = session.tournamentToken ?? existing.tournamentToken
         } else {
-          playerSessions.set(pid, { playerId: pid, name: session.name, roomId: null, trucoRoomId: null, gauchoRoomId: null, canastraRoomId: null, blackjackRoomId: null, pushyourluckdrawRoomId: null, tournamentToken: session.tournamentToken })
+          playerSessions.set(pid, { playerId: pid, name: session.name, roomId: null, trucoRoomId: null, gauchoRoomId: null, canastraRoomId: null, blackjackRoomId: null, pushyourluckdrawRoomId: null, tournamentToken: session.tournamentToken, lastSeenAt: Date.now() })
         }
 
         // Restore tournament registration
@@ -439,6 +603,12 @@ const server = Bun.serve<Session>({
             emit({ type: 'tournament_unregistered' })
           }
         }
+
+        // Counted under whatever playerId this connection ended up as (the
+        // tournament-restore block above can reassign session.playerId) —
+        // see markConnected()/PLAYER_SESSION_TTL_MS. Paired with
+        // markDisconnected() in close().
+        markConnected(session.playerId)
 
         // `activeLobbyTab` starts null on every fresh connection (reconnects
         // included — see the Session field doc) — this narrows subscriptions
@@ -470,10 +640,9 @@ const server = Bun.serve<Session>({
           break
 
         // ── Create lobby room ───────────────────────────────────────────────
+        // No flat cap on concurrent rooms — see the create-room rate limit
+        // above (CREATE_ROOM_TYPES) for what actually guards this now.
         case 'create_room': {
-          if (lobbyRoomCount() >= MAX_LOBBY_ROOMS) {
-            emit({ type: 'room_error', message: `Limite de ${MAX_LOBBY_ROOMS} salas atingido.` }); break
-          }
           const room = new Room(generateId(), msg.roomName.trim().slice(0, 40) || 'Mesa', session.name, msg.config, {
             onExpire: () => { rooms.delete(room.id); broadcastRoomList() },
           })
@@ -925,6 +1094,13 @@ const server = Bun.serve<Session>({
     close(ws) {
       openConnections--
       logger.info('player_disconnected', { 'poker.player_id': ws.data.playerId || null })
+      if (ws.data.playerId) {
+        markDisconnected(ws.data.playerId)
+        const ps = playerSessions.get(ws.data.playerId)
+        // Refresh the TTL clock to "time of last disconnect" — see the
+        // PLAYER_SESSION_TTL_MS sweep near playerSessions' declaration.
+        if (ps) ps.lastSeenAt = Date.now()
+      }
       // Lobby players stay in their room (persistent session handles reconnect)
       // Tournament players stay registered via token cookie
       // Blackjack: a real disconnect briefly holds the seat/bet instead of an
@@ -1108,7 +1284,6 @@ function setPersistentToken(pid: string, token: string | null): void {
 }
 
 function lobbyRoomList()  { return [...rooms.values()].filter(r => !r.tournamentId).map(r => r.summary()) }
-function lobbyRoomCount() { return [...rooms.values()].filter(r => !r.tournamentId).length }
 function trucoRoomList()  { return [...trucoRooms.values()].map(r => r.summary()) }
 function gauchoRoomList() { return [...gauchoRooms.values()].map(r => r.summary()) }
 function canastraRoomList() { return [...canastraRooms.values()].map(r => r.summary()) }
@@ -1148,8 +1323,8 @@ function sumPlayers(map: Map<string, { playerCount: number }>): number {
  *  straight off the room Maps (so they're always current, no separate
  *  bookkeeping needed), merged with the since-boot cumulative counters from
  *  ./metrics.ts. Poker's counts include tournament tables alongside regular
- *  lobby ones (unlike lobbyRoomList()/lobbyRoomCount()) — for "how much load
- *  is this game generating right now" both count the same. */
+ *  lobby ones (unlike lobbyRoomList()) — for "how much load is this game
+ *  generating right now" both count the same. */
 function getAdminMetrics() {
   return {
     uptimeSeconds: Math.floor((Date.now() - serverStartedAt) / 1000),

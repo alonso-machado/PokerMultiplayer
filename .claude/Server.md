@@ -46,12 +46,39 @@ devem ativar antes de qualquer módulo de aplicação carregar).
 No `hello`, o servidor tenta recuperar a sessão persistente e reconectar o
 jogador à sala ou ao torneio sem nenhuma ação do cliente.
 
+**TTL da sessão persistente:** `playerSessions` não é mais permanente — uma
+entrada cujo jogador está desconectado (`connectedCounts` não o contém) e
+sem atividade há mais de `PLAYER_SESSION_TTL_HOURS` (padrão 48h) é varrida
+por um `setInterval`. Um jogador com socket aberto nunca é removido,
+independente de há quanto tempo está conectado. Ver `lastSeenAt` /
+`markConnected` / `markDisconnected` em `index.ts`.
+
 **Salas de torneio vs lobby:** o campo `room.tournamentId` distingue os dois
 tipos. Operações de lobby (leave, rebuy, expire) são bloqueadas em mesas de
 torneio. O `index.ts` filtra `lobbyRoomList()` excluindo `tournamentId`.
 
-**Limite de salas:** `MAX_LOBBY_ROOMS = 30`. Salas de torneio não contam nesse
-limite.
+**Limite de salas:** não existe mais um teto numérico de salas simultâneas.
+`create_room` (poker, truco, gaúcho, canastra, pushyourluckdraw) é protegido
+por um rate limit dedicado, mais estrito que o das outras ações de jogo
+(pass/join/stop/leave...) e verificado em duas dimensões — por conexão
+(`WS_MAX_CREATES_PER_CONN`, padrão 5/min) e por IP via `X-Forwarded-For`
+(`WS_MAX_CREATES_PER_IP`, padrão 10/min) — para não ser contornável abrindo
+várias conexões. Ver `CREATE_ROOM_TYPES` em `index.ts`.
+
+**Rate limits do WS — visão geral:** três camadas independentes, todas
+atrás da mesma flag `RATE_LIMIT_ENABLED` (default ON; `false` desliga tudo
+de uma vez para rodar `loadtest/`):
+| Camada | Escopo | Padrão | Env |
+|---|---|---|---|
+| Geral por conexão | qualquer mensagem, 1 socket | 30/s | `WS_MAX_MSGS_PER_SEC` |
+| Geral por IP | qualquer mensagem, todas as conexões de 1 IP | 100/s | `WS_MAX_MSGS_PER_SEC_PER_IP` |
+| Criação por conexão | `*_create_room`, 1 socket | 5/min | `WS_MAX_CREATES_PER_CONN` |
+| Criação por IP | `*_create_room`, todas as conexões de 1 IP | 10/min | `WS_MAX_CREATES_PER_IP` |
+
+O limite por IP fica deliberadamente bem acima do limite por conexão — uma
+NAT doméstica/escritório (ou a própria máquina do loadtest, que abre várias
+conexões de bot) legitimamente roda várias conexões, cada uma com direito
+ao seu próprio orçamento por conexão. O IP só entra como teto adicional.
 
 **Auto-start no lobby:** quando o 2º jogador entra em uma sala de lobby, o jogo
 inicia automaticamente após 300ms (via `setTimeout`). Não há botão de start no
