@@ -127,6 +127,19 @@ jogo segue pro próximo assento. Sair durante a janela de aposta (antes de
 qualquer carta distribuída) devolve a aposta pendente normalmente, já que
 nada começou de fato.
 
+## Desconexão
+
+Diferente de "Sair da mesa" (acima), uma queda de conexão real (fechar a
+aba, perder a rede) **não** tira o jogador da mesa na hora — o assento,
+aposta e mão em aberto ficam reservados por `BLACKJACK_DISCONNECT_GRACE_S`
+(padrão 30s; ver `BlackjackRoom.handleDisconnect()`). Os timers de
+aposta/seguro/turno já existentes cobrem o caso "não consegue agir" nesse
+meio-tempo, então a mesa nunca trava — só muda o fato de uma queda breve não
+custar mais a aposta na hora. Reconectar dentro da janela restaura a mão
+exatamente de onde parou (ver `reconnect()`); se a janela expirar sem
+reconexão, o jogador é removido normalmente, com a mesma perda de
+aposta/mão em aberto do "Sair da mesa".
+
 ## Sem surrender, sem even money
 
 A fonte não menciona nenhum dos dois — não foram implementados.

@@ -202,6 +202,11 @@ export type ServerMessage =
   | { type: 'identity'; token: string }
   // ── Generic ────────────────────────────────────────────────────────────────
   | { type: 'error'; message: string }
+  /** Broadcast once, right before the process exits for a deploy/restart —
+   *  gives the client a chance to show a clear "restarting" message instead
+   *  of a silent dead connection that looks like a bug. See index.ts's
+   *  SIGTERM/SIGINT handlers. */
+  | { type: 'server_restarting' }
   // ── Truco (see below) ─────────────────────────────────────────────────────
   | TrucoServerMessage
   // ── Truco Gaúcho (see below) ──────────────────────────────────────────────

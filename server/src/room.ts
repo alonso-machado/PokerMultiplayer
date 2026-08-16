@@ -2,6 +2,7 @@ import type { RoomConfig, RoomSummary, ServerMessage, PlayerAction } from '../..
 import { startingChipsFor } from '../../shared/types'
 import { PokerGame } from './poker/gameEngine'
 import { logger } from './logger'
+import { gameMetrics } from './metrics'
 
 export type SendFn = (msg: ServerMessage) => void
 
@@ -18,6 +19,15 @@ export interface RoomOptions {
 const EMPTY_TTL           = 10 * 60 * 1000
 const REBUY_TIMEOUT_S     = 60
 const SHOWDOWN_DURATION_MS = Number(process.env.SHOWDOWN_DURATION_MS ?? 4000)
+/** Server-side backstop only — the front already runs its own 90s countdown
+ *  and self-folds a connected-but-idle player (see PokerTable.tsx's
+ *  ACTION_TIMEOUT_S), which handles the normal "just AFK" case with a visible
+ *  countdown. This exists purely for when that client-side timer can never
+ *  run at all: a dead tab/connection can't send its own fold, so without
+ *  this, every other game auto-resolves a stalled turn but poker would wait
+ *  forever. Set comfortably above the client's 90s so a normal reconnect
+ *  (which restarts the client's countdown fresh) never races this. */
+const TURN_TIMEOUT_S = Number(process.env.POKER_TURN_TIMEOUT_S ?? 120)
 
 export class Room {
   readonly id: string
@@ -32,6 +42,7 @@ export class Room {
   private started = false
   private expireTimer: ReturnType<typeof setTimeout> | null = null
   private rebuyTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private turnTimer: ReturnType<typeof setTimeout> | null = null
   private readonly onExpire?: () => void
   private readonly onPlayersEliminated?: (eliminations: { playerId: string; totalBet: number }[]) => void
 
@@ -277,6 +288,8 @@ export class Room {
   }
 
   private endHand(): void {
+    this.clearTurnTimer()
+    gameMetrics.poker.handsCompleted++
     const result = this.game.resolveShowdown()
 
     this.broadcastAll({
@@ -321,12 +334,18 @@ export class Room {
   }
 
   private notifyCurrentPlayer(): void {
+    this.clearTurnTimer()
     const current = this.game.currentPlayer()
     if (!current) return
     const rp = this.players.find(p => p.id === current.id)
     if (rp?.away) { setTimeout(() => this.autoFold(current.id), 800); return }
     const { actions, callAmount, minRaise } = this.game.validActions(current)
     this.sendTo(current.id, { type: 'your_turn', validActions: actions, minRaise, callAmount })
+    this.turnTimer = setTimeout(() => this.autoFold(current.id), TURN_TIMEOUT_S * 1000)
+  }
+
+  private clearTurnTimer(): void {
+    if (this.turnTimer) { clearTimeout(this.turnTimer); this.turnTimer = null }
   }
 
   // ── Reconnect ─────────────────────────────────────────────────────────────
@@ -392,6 +411,7 @@ export class Room {
 
   destroy(): void {
     this.clearExpiry()
+    this.clearTurnTimer()
     for (const t of this.rebuyTimers.values()) clearTimeout(t)
     this.rebuyTimers.clear()
   }

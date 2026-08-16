@@ -19,8 +19,23 @@ import { BlackjackRoom } from './blackjackRoom'
 import { PushYourLuckDrawRoom } from './pushyourluckdrawRoom'
 import { Tournament } from './tournament'
 import { adminRouter, publicTournamentHandler } from './admin'
+import { gameMetrics, serverStartedAt } from './metrics'
 
 const MAX_LOBBY_ROOMS = Number(process.env.MAX_LOBBIES ?? 30)
+
+// ── Per-connection message rate limit ──────────────────────────────────────
+// Cheap, blanket protection against a client (buggy or malicious) hammering
+// any message type — deliberately not type-specific, so it can't be bypassed
+// by picking an "exempt" message. Generous enough to never bother a real
+// player: even our own load-test bots acting at maximum speed (zero
+// simulated "thinking time") only reached a few actions/sec per connection.
+// Gated behind a flag (default ON) so a deliberate loadtest/pushyourluckdraw-
+// loadtest.js run against a non-production target can disable it with
+// -e RATE_LIMIT_ENABLED=false / RATE_LIMIT_ENABLED=false in the server env —
+// without this it would just look like a self-inflicted breaking point.
+const RATE_LIMIT_ENABLED = process.env.RATE_LIMIT_ENABLED !== 'false'
+const MAX_MESSAGES_PER_WINDOW = Number(process.env.WS_MAX_MSGS_PER_SEC ?? 30)
+const MESSAGE_WINDOW_MS = 1000
 
 /** Per-game lobby pub/sub topics. Every connection starts subscribed to all
  *  six (so an idle/browsing client sees every game's live room list — same
@@ -62,6 +77,7 @@ const canastraRooms = new Map<string, CanastraRoom>()
 const blackjackRooms = new Map<string, BlackjackRoom>()
 const pushyourluckdrawRooms = new Map<string, PushYourLuckDrawRoom>()
 let activeTournament: Tournament | null = null
+let openConnections = 0
 
 // ── Persistent player sessions (survive WS reconnect) ─────────────────────────
 interface PersistentSession {
@@ -93,6 +109,9 @@ interface Session {
    *  signal from the client, so it isn't persisted across reconnects; the
    *  front resends it the moment it (re)connects. */
   activeLobbyTab: LobbyGame | null
+  /** Rate-limit bucket — see MAX_MESSAGES_PER_WINDOW below. */
+  msgCount: number
+  msgWindowResetAt: number
 }
 
 function generateId(): string { return randomId(9) }
@@ -227,6 +246,8 @@ const handleAdmin = adminRouter(
     activeTournament.destroy(); activeTournament = null
     broadcastTournamentInfo(); return { ok: true }
   },
+
+  getAdminMetrics,
 )
 
 const handlePublicTournament = publicTournamentHandler(() => activeTournament?.info() ?? null)
@@ -249,7 +270,7 @@ const server = Bun.serve<Session>({
 
     if (pathname === '/ws') {
       const ok = server.upgrade(req, {
-        data: { playerId: '', name: 'Jogador', roomId: null, trucoRoomId: null, gauchoRoomId: null, canastraRoomId: null, blackjackRoomId: null, pushyourluckdrawRoomId: null, tournamentToken: null, activeLobbyTab: null } as Session,
+        data: { playerId: '', name: 'Jogador', roomId: null, trucoRoomId: null, gauchoRoomId: null, canastraRoomId: null, blackjackRoomId: null, pushyourluckdrawRoomId: null, tournamentToken: null, activeLobbyTab: null, msgCount: 0, msgWindowResetAt: 0 } as Session,
       })
       return ok ? undefined : new Response('Upgrade failed', { status: 400 })
     }
@@ -274,6 +295,7 @@ const server = Bun.serve<Session>({
 
   websocket: {
     open(ws) {
+      openConnections++
       // Subscribe so broadcastTournamentInfo() (server.publish('lobby', ...)) reaches
       // this socket — without this, clients only see tournament updates pushed at
       // connect time and never learn about a newly-created tournament until they
@@ -292,11 +314,21 @@ const server = Bun.serve<Session>({
     },
 
     async message(ws, raw) {
+      // Cheapest possible rejection — before even touching JSON.parse — for a
+      // connection sending messages faster than any real client legitimately
+      // would. See MAX_MESSAGES_PER_WINDOW above.
+      const session = ws.data
+      if (RATE_LIMIT_ENABLED) {
+        const now = Date.now()
+        if (now > session.msgWindowResetAt) { session.msgWindowResetAt = now + MESSAGE_WINDOW_MS; session.msgCount = 0 }
+        session.msgCount++
+        if (session.msgCount > MAX_MESSAGES_PER_WINDOW) return
+      }
+
       const msg: ClientMessage | null = parseClientMessage(raw)
       if (!msg) { send(ws, { type: 'error', message: 'Mensagem inválida.' }); return }
 
-      const session = ws.data
-      const emit    = (m: ServerMessage) => send(ws, m)
+      const emit = (m: ServerMessage) => send(ws, m)
 
       // ── hello ────────────────────────────────────────────────────────────
       if (msg.type === 'hello') {
@@ -891,14 +923,16 @@ const server = Bun.serve<Session>({
     },
 
     close(ws) {
+      openConnections--
       logger.info('player_disconnected', { 'poker.player_id': ws.data.playerId || null })
       // Lobby players stay in their room (persistent session handles reconnect)
       // Tournament players stay registered via token cookie
-      // Blackjack: closing the tab counts as leaving — same as clicking "Sair
-      // da mesa" — so the table doesn't sit waiting on a seat/turn that can
-      // never act again, and the seat/chips aren't held for a comeback (see
-      // .claude/Blackjack.md → "Sair da mesa").
-      if (ws.data.blackjackRoomId) leaveBlackjackRoom(ws)
+      // Blackjack: a real disconnect briefly holds the seat/bet instead of an
+      // instant forfeit — the existing betting/insurance/turn timers already
+      // auto-resolve anything that needs their input either way, so the table
+      // never stalls; this only changes whether a brief drop costs the bet.
+      // See BlackjackRoom.handleDisconnect() / .claude/Blackjack.md → "Sair da mesa".
+      if (ws.data.blackjackRoomId) disconnectBlackjackPlayer(ws)
       // Push Your Luck Draw: also treated as leaving immediately (table stays
       // open for whoever's left, never dissolves on just one departure), but
       // unlike Blackjack the match score is preserved for a same-match rejoin
@@ -986,6 +1020,9 @@ function setPersistentCanastraRoom(pid: string, canastraRoomId: string | null): 
   if (ps) ps.canastraRoomId = canastraRoomId
 }
 
+/** Explicit "Sair da mesa" only (the `blackjack_leave_room` message) — a real
+ *  disconnect goes through disconnectBlackjackPlayer() below instead, which
+ *  gives a brief grace period rather than an instant forfeit. */
 function leaveBlackjackRoom(ws: { data: Session; subscribe: (topic: string) => void; unsubscribe: (topic: string) => void }): void {
   const { playerId, blackjackRoomId } = ws.data
   if (!blackjackRoomId) return
@@ -996,9 +1033,27 @@ function leaveBlackjackRoom(ws: { data: Session; subscribe: (topic: string) => v
   }
   ws.data.blackjackRoomId = null
   setPersistentBlackjackRoom(playerId, null)
-  // Harmless even when called from close() with the socket already going
-  // away (see close() below) — subscribe/unsubscribe on a dead socket is a no-op.
   syncLobbySubscription(ws, ws.data, ws.data.activeLobbyTab)
+}
+
+/** A real disconnect (closed tab/app) — see close() above and
+ *  BlackjackRoom.handleDisconnect(). Deliberately does NOT touch
+ *  `ws.data.blackjackRoomId` or the persistent session's copy of it: unlike
+ *  every other leave path, we want a later `hello` to still find this player
+ *  "in" the room so it reconnects them, for as long as the room itself keeps
+ *  their seat reserved. Only once the grace period actually expires (the
+ *  `onExpire` callback) do we clear the persistent session, mirroring what
+ *  leaveBlackjackRoom() does immediately for an explicit leave. */
+function disconnectBlackjackPlayer(ws: { data: Session }): void {
+  const { playerId, blackjackRoomId } = ws.data
+  if (!blackjackRoomId) return
+  const room = blackjackRooms.get(blackjackRoomId)
+  if (!room) return
+  room.handleDisconnect(playerId, () => {
+    const ps = playerSessions.get(playerId)
+    if (ps) ps.blackjackRoomId = null
+    if (room.playerCount === 0) { room.destroy(); blackjackRooms.delete(blackjackRoomId) }
+  })
 }
 
 function setPersistentBlackjackRoom(pid: string, blackjackRoomId: string | null): void {
@@ -1083,6 +1138,33 @@ function broadcastBlackjackLobbyStats(): void {
   server.publish(LOBBY_TOPICS.blackjack, JSON.stringify({ type: 'blackjack_lobby_stats', ...blackjackLobbyStats() } satisfies ServerMessage))
 }
 
+function sumPlayers(map: Map<string, { playerCount: number }>): number {
+  let total = 0
+  for (const r of map.values()) total += r.playerCount
+  return total
+}
+
+/** Live snapshot for the admin metrics tab — active tables/players read
+ *  straight off the room Maps (so they're always current, no separate
+ *  bookkeeping needed), merged with the since-boot cumulative counters from
+ *  ./metrics.ts. Poker's counts include tournament tables alongside regular
+ *  lobby ones (unlike lobbyRoomList()/lobbyRoomCount()) — for "how much load
+ *  is this game generating right now" both count the same. */
+function getAdminMetrics() {
+  return {
+    uptimeSeconds: Math.floor((Date.now() - serverStartedAt) / 1000),
+    openConnections,
+    games: {
+      poker:            { activeTables: rooms.size,              activePlayers: sumPlayers(rooms),              ...gameMetrics.poker },
+      truco:            { activeTables: trucoRooms.size,         activePlayers: sumPlayers(trucoRooms),         ...gameMetrics.truco },
+      gaucho:           { activeTables: gauchoRooms.size,        activePlayers: sumPlayers(gauchoRooms),        ...gameMetrics.gaucho },
+      canastra:         { activeTables: canastraRooms.size,      activePlayers: sumPlayers(canastraRooms),      ...gameMetrics.canastra },
+      blackjack:        { activeTables: blackjackRooms.size,     activePlayers: sumPlayers(blackjackRooms),     ...gameMetrics.blackjack },
+      pushyourluckdraw: { activeTables: pushyourluckdrawRooms.size, activePlayers: sumPlayers(pushyourluckdrawRooms), ...gameMetrics.pushyourluckdraw },
+    },
+  }
+}
+
 function isSeatedIn(session: Session, game: LobbyGame): boolean {
   switch (game) {
     case 'poker':            return session.roomId !== null
@@ -1130,11 +1212,18 @@ function broadcastTournamentInfo(): void {
 
 logger.info('server_started', { 'poker.port': server.port, 'poker.url': `http://localhost:${server.port}` })
 
-process.on('SIGTERM', async () => {
+/** Warn every connected client before this process actually goes down (deploy,
+ *  restart, `docker stop`) — without this, a redeploy just silently kills
+ *  every live game mid-hand and looks like a bug rather than an expected
+ *  restart. `'lobby'` is still the one topic every connection stays
+ *  subscribed to for its whole lifetime (see LOBBY_TOPICS above), so this
+ *  reaches everyone regardless of which game-specific topics they're on. A
+ *  short delay before exit gives the message an actual chance to flush over
+ *  the wire instead of racing the process teardown. */
+async function shutdown(): Promise<void> {
+  server.publish('lobby', JSON.stringify({ type: 'server_restarting' } satisfies ServerMessage))
   await shutdownTelemetry()
-  process.exit(0)
-})
-process.on('SIGINT', async () => {
-  await shutdownTelemetry()
-  process.exit(0)
-})
+  setTimeout(() => process.exit(0), 250)
+}
+process.on('SIGTERM', shutdown)
+process.on('SIGINT', shutdown)

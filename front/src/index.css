@@ -18,6 +18,13 @@
 
 body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
 
+.connection-banner {
+  position: sticky; top: 0; z-index: 1000;
+  background: var(--gold); color: #2a2205;
+  text-align: center; font-size: 0.85rem; font-weight: 600;
+  padding: 0.45rem 1rem;
+}
+
 button { cursor: pointer; border: none; border-radius: 6px; font-size: 0.9rem; font-weight: 600; padding: 0.5rem 1.1rem; transition: opacity 0.15s, transform 0.1s; }
 button:hover { opacity: 0.88; }
 button:active { transform: scale(0.97); }
@@ -384,6 +391,21 @@ input:focus { border-color: var(--gold); }
 .ati-row { display: flex; justify-content: space-between; padding: 0.35rem 0; border-bottom: 1px solid rgba(255,255,255,.05); font-size: 0.85rem; }
 .ati-row span { color: var(--text-muted); }
 .ati-row strong { color: var(--text); }
+
+.admin-tabs { margin-bottom: 1.2rem; border-bottom: 1px solid var(--border); }
+
+.metrics-overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 0.6rem; margin-bottom: 1.2rem; }
+.metrics-stat { background: rgba(255,255,255,.03); border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 0.8rem; text-align: center; }
+.metrics-stat span { display: block; color: var(--text-muted); font-size: 0.72rem; margin-bottom: 0.25rem; }
+.metrics-stat strong { color: var(--gold-light); font-size: 1.15rem; }
+
+.metrics-table-wrap { overflow-x: auto; }
+.metrics-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.metrics-table th { text-align: left; color: var(--text-muted); font-weight: 600; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.metrics-table td { padding: 0.4rem 0.6rem; border-bottom: 1px solid rgba(255,255,255,.05); white-space: nowrap; }
+.metrics-table th:not(:first-child), .metrics-table td:not(:first-child) { text-align: right; }
+
+.metrics-note { margin-top: 0.8rem; }
 
 /* ── Fluid card sizing ─────────────────────────────────────────────────── */
 /* SVG width attrs can be overridden by CSS — scales cards between phone & desktop */

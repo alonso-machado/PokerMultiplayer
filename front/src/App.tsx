@@ -47,6 +47,10 @@ function App() {
 function AppInner() {
   const posthog = usePostHog()
   const [myName, setMyNameState] = useState(identity.name)
+  // Set on a server_restarting broadcast, cleared once the connection comes
+  // back — distinguishes "the server told us it's restarting" from any other
+  // drop for the banner's copy (see the connection-status banner below).
+  const [restarting, setRestarting] = useState(false)
   const [activeGame, setActiveGame] = useState<GameGroup>('poker')
   const [activePokerTab, setActivePokerTab] = useState<PokerTab>('rooms')
   const [rooms, setRooms]         = useState<RoomSummary[]>([])
@@ -219,6 +223,10 @@ function AppInner() {
         identity.playerId = msg.token
         break
 
+      case 'server_restarting':
+        setRestarting(true)
+        break
+
       default:
         if (msg.type.startsWith('truco_')) handleTrucoMessage(msg)
         else if (msg.type.startsWith('gaucho_')) handleGauchoMessage(msg)
@@ -241,6 +249,21 @@ function AppInner() {
     if (connected) send({ type: 'set_active_lobby', game: activeGame })
   }, [activeGame, connected, send])
 
+  // A successful reconnect means whatever prompted `server_restarting` is over.
+  useEffect(() => {
+    if (connected) setRestarting(false)
+  }, [connected])
+
+  // Rendered as the first child of every return branch below (lobby view and
+  // every game's active-table view) so a drop is always visible, whichever
+  // screen the player happens to be on. useSocket() retries with backoff on
+  // its own — this is purely the "something's happening, hang tight" signal.
+  const connectionBanner = !connected && (
+    <div className="connection-banner">
+      {restarting ? '🔄 Servidor reiniciando — reconectando automaticamente…' : '🔌 Conexão perdida — tentando reconectar…'}
+    </div>
+  )
+
   function setMyName(name: string) {
     setMyNameState(name); saveName(name); identity.name = name
     send({ type: 'set_name', name })
@@ -261,6 +284,8 @@ function AppInner() {
 
   if (blackjackState.roomId) {
     return (
+      <>
+      {connectionBanner}
       <BlackjackTable
         myId={blackjackState.myId}
         players={blackjackState.players}
@@ -277,11 +302,14 @@ function AppInner() {
         onDouble={() => send({ type: 'blackjack_double' })}
         onSplit={() => send({ type: 'blackjack_split' })}
       />
+      </>
     )
   }
 
   if (pushYourLuckDrawState.roomId && pushYourLuckDrawState.config) {
     return (
+      <>
+      {connectionBanner}
       <PushYourLuckDrawTable
         myId={pushYourLuckDrawState.myId}
         roomName={pushYourLuckDrawState.roomName}
@@ -304,11 +332,14 @@ function AppInner() {
         onThrowJoker={(targetId) => send({ type: 'pushyourluckdraw_throw_joker', targetId })}
         onRematchVote={(accept) => send({ type: 'pushyourluckdraw_rematch_vote', accept })}
       />
+      </>
     )
   }
 
   if (canastraState.roomId && canastraState.config) {
     return (
+      <>
+      {connectionBanner}
       <CanastraTable
         myId={canastraState.myId}
         roomName={canastraState.roomName}
@@ -328,11 +359,14 @@ function AppInner() {
         onDiscard={(cardId) => send({ type: 'canastra_discard', cardId })}
         onRematchVote={(accept) => send({ type: 'canastra_rematch_vote', accept })}
       />
+      </>
     )
   }
 
   if (gauchoState.roomId && gauchoState.config) {
     return (
+      <>
+      {connectionBanner}
       <GauchoTable
         myId={gauchoState.myId}
         roomName={gauchoState.roomName}
@@ -360,11 +394,14 @@ function AppInner() {
         onMaoDeOnzeDecision={(accept) => send({ type: 'gaucho_mao_de_onze_decision', accept })}
         onRematchVote={(accept) => send({ type: 'gaucho_rematch_vote', accept })}
       />
+      </>
     )
   }
 
   if (trucoState.roomId && trucoState.config) {
     return (
+      <>
+      {connectionBanner}
       <TrucoTable
         myId={trucoState.myId}
         roomName={trucoState.roomName}
@@ -385,12 +422,14 @@ function AppInner() {
         onMaoDeOnzeDecision={(accept) => send({ type: 'truco_mao_de_onze_decision', accept })}
         onRematchVote={(accept) => send({ type: 'truco_rematch_vote', accept })}
       />
+      </>
     )
   }
 
   if (roomId && roomConfig) {
     return (
       <>
+        {connectionBanner}
         <PokerTable
           myId={identity.playerId} myName={myName}
           roomName={roomName} config={roomConfig}
@@ -422,6 +461,7 @@ function AppInner() {
 
   return (
     <>
+    {connectionBanner}
     <div className="lobby">
       <h1>
         {activeGame === 'poker' ? "♠ Texas Hold'em ♥"

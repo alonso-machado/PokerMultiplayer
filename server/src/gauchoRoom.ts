@@ -1,6 +1,7 @@
 import type { Card, GauchoRoomConfig, GauchoRoomSummary, GauchoServerMessage } from '../../shared/types'
 import { GauchoGame } from './gaucho/gameEngine'
 import { logger } from './logger'
+import { gameMetrics } from './metrics'
 
 export type GauchoSendFn = (msg: GauchoServerMessage) => void
 
@@ -252,6 +253,7 @@ export class GauchoRoom {
   }
 
   private finishHand(): void {
+    gameMetrics.gaucho.handsCompleted++
     const result = this.game.lastHandResult!
     this.broadcastAll({
       type: 'gaucho_hand_end', winnerTeam: result.winnerTeam, points: result.points,
@@ -263,6 +265,7 @@ export class GauchoRoom {
   }
 
   private finishMatch(): void {
+    gameMetrics.gaucho.matchesCompleted++
     const result = this.game.matchResult()!
     this.game.recordMatchWin(result.winnerTeam)
     const matchWins: Record<string, number> = {}

@@ -1,6 +1,7 @@
 import type { PushYourLuckDrawRoomConfig, PushYourLuckDrawRoomSummary, PushYourLuckDrawServerMessage } from '../../shared/types'
 import { PushYourLuckDrawGame, type PushYourLuckDrawDisconnectSnapshot } from './pushyourluckdraw/gameEngine'
 import { logger } from './logger'
+import { gameMetrics } from './metrics'
 
 export type PushYourLuckDrawSendFn = (msg: PushYourLuckDrawServerMessage) => void
 
@@ -298,6 +299,7 @@ export class PushYourLuckDrawRoom {
 
   private finishRound(): void {
     this.clearTurnTimer()
+    gameMetrics.pushyourluckdraw.roundsCompleted++
     this.broadcastAll({ type: 'pushyourluckdraw_round_end', players: this.game.publicPlayers(), tableState: this.game.tableState })
 
     if (this.game.isMatchOver()) setTimeout(() => this.finishMatch(), ROUND_END_DELAY_MS)
@@ -310,6 +312,7 @@ export class PushYourLuckDrawRoom {
   }
 
   private finishMatch(): void {
+    gameMetrics.pushyourluckdraw.matchesCompleted++
     const result = this.game.lastMatchResult!
     this.game.recordMatchWin(result.winnerIds)
     this.broadcastAll({

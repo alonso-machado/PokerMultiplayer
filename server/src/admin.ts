@@ -91,6 +91,7 @@ export function adminRouter(
   createTournament:  (data: TournamentData)  => { ok: boolean; error?: string },
   startTournament:   () => { ok: boolean; error?: string },
   deleteTournament:  () => { ok: boolean; error?: string },
+  getMetrics:        () => object,
 ): Handler {
   return async (req, url) => {
     const path   = url.pathname
@@ -146,6 +147,10 @@ export function adminRouter(
 
     if (path === '/api/admin/bloomfilter' && method === 'GET') {
       return json(usernameFilter.stats())
+    }
+
+    if (path === '/api/admin/metrics' && method === 'GET') {
+      return json(getMetrics())
     }
 
     return json({ error: 'Not found.' }, 404)

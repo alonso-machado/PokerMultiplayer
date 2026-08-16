@@ -1,6 +1,7 @@
 import type { Card, TrucoRoomConfig, TrucoRoomSummary, TrucoServerMessage } from '../../shared/types'
 import { TrucoGame } from './truco/gameEngine'
 import { logger } from './logger'
+import { gameMetrics } from './metrics'
 
 export type TrucoSendFn = (msg: TrucoServerMessage) => void
 
@@ -204,6 +205,7 @@ export class TrucoRoom {
   }
 
   private finishHand(): void {
+    gameMetrics.truco.handsCompleted++
     const result = this.game.lastHandResult!
     this.broadcastAll({
       type: 'truco_hand_end', winnerTeam: result.winnerTeam, points: result.points,
@@ -215,6 +217,7 @@ export class TrucoRoom {
   }
 
   private finishMatch(): void {
+    gameMetrics.truco.matchesCompleted++
     const result = this.game.matchResult()!
     this.game.recordMatchWin(result.winnerTeam)
     const matchWins: Record<string, number> = {}

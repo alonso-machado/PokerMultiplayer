@@ -1,6 +1,7 @@
 import type { BlackjackServerMessage } from '../../shared/types'
 import { BlackjackGame } from './blackjack/gameEngine'
 import { logger } from './logger'
+import { gameMetrics } from './metrics'
 
 export type BlackjackSendFn = (msg: BlackjackServerMessage) => void
 
@@ -19,6 +20,9 @@ const INSURANCE_TIMEOUT_S = Number(process.env.BLACKJACK_INSURANCE_TIMEOUT ?? 15
 const TURN_TIMEOUT_S      = Number(process.env.BLACKJACK_TURN_TIMEOUT ?? 30)
 const ROUND_END_DELAY_MS  = Number(process.env.BLACKJACK_ROUND_END_DELAY_MS ?? 4000)
 const NO_BETTORS_RETRY_MS = 1500
+/** How long a disconnected player's seat/bet/hand stay reserved before
+ *  they're actually removed — see handleDisconnect() below. */
+const DISCONNECT_GRACE_S  = Number(process.env.BLACKJACK_DISCONNECT_GRACE_S ?? 30)
 
 /** Orchestration for Blackjack — structurally unlike trucoRoom.ts/canastraRoom.ts:
  *  no room creation (see the matchmaking `blackjack_join` handler in index.ts),
@@ -39,6 +43,7 @@ export class BlackjackRoom {
   private phaseTimer: ReturnType<typeof setTimeout> | null = null
   private deadlineAt: number | null = null
   private roundEndTimer: ReturnType<typeof setTimeout> | null = null
+  private disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
   private readonly onEmpty?: () => void
   private readonly onPlayersChanged?: () => void
@@ -74,6 +79,7 @@ export class BlackjackRoom {
   leave(pid: string): void {
     const wasPresent = this.players.some((p) => p.id === pid)
     if (!wasPresent) return
+    this.cancelDisconnectTimer(pid)
     const wasTurnOf = this.game.currentPlayerId() === pid
 
     this.game.handleLeaveDuringRound(pid)
@@ -103,6 +109,33 @@ export class BlackjackRoom {
       this.broadcastState()
       if (this.game.allInsuranceDecided()) { this.clearPhaseTimer(); this.closeInsurance() }
     }
+  }
+
+  /** A real disconnect (closed tab/app) — unlike leave(), does NOT remove the
+   *  player immediately. Their seat/bet/hand stay exactly as they were; the
+   *  existing betting/insurance/turn timers already auto-resolve anything
+   *  that needs their input regardless of whether they're connected (see
+   *  TURN_TIMEOUT_S etc.), so the table never stalls on them either way —
+   *  the only thing this changes is that a brief drop no longer instantly
+   *  forfeits their bet. If they don't reconnect within DISCONNECT_GRACE_S,
+   *  `onExpire` fires alongside the normal leave() so the caller (index.ts)
+   *  can clear its own session bookkeeping for a connection that's long gone. */
+  handleDisconnect(pid: string, onExpire: () => void): void {
+    const rp = this.players.find((p) => p.id === pid)
+    if (!rp) return
+    rp.send = () => {} // the underlying socket is gone — never call into it again
+    this.cancelDisconnectTimer(pid)
+    const timer = setTimeout(() => {
+      this.disconnectTimers.delete(pid)
+      this.leave(pid)
+      onExpire()
+    }, DISCONNECT_GRACE_S * 1000)
+    this.disconnectTimers.set(pid, timer)
+  }
+
+  private cancelDisconnectTimer(pid: string): void {
+    const t = this.disconnectTimers.get(pid)
+    if (t) { clearTimeout(t); this.disconnectTimers.delete(pid) }
   }
 
   // ── Betting ───────────────────────────────────────────────────────────────
@@ -202,6 +235,7 @@ export class BlackjackRoom {
 
   private finishRound(): void {
     this.clearPhaseTimer()
+    gameMetrics.blackjack.roundsCompleted++
     this.broadcastAll({
       type: 'blackjack_round_end', players: this.game.publicPlayers(),
       dealer: this.game.tableState.dealer, tableState: this.game.tableState,
@@ -225,6 +259,7 @@ export class BlackjackRoom {
   // ── Reconnect ─────────────────────────────────────────────────────────────
 
   reconnect(pid: string, send: BlackjackSendFn): void {
+    this.cancelDisconnectTimer(pid)
     const rp = this.players.find((p) => p.id === pid)
     if (rp) rp.send = send
 
@@ -266,5 +301,7 @@ export class BlackjackRoom {
   destroy(): void {
     this.clearPhaseTimer()
     if (this.roundEndTimer) { clearTimeout(this.roundEndTimer); this.roundEndTimer = null }
+    for (const t of this.disconnectTimers.values()) clearTimeout(t)
+    this.disconnectTimers.clear()
   }
 }

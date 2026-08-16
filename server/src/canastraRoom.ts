@@ -1,6 +1,7 @@
 import type { CanastraMeldPlan, CanastraRoomConfig, CanastraRoomSummary, CanastraServerMessage } from '../../shared/types'
 import { CanastraGame } from './canastra/gameEngine'
 import { logger } from './logger'
+import { gameMetrics } from './metrics'
 
 export type CanastraSendFn = (msg: CanastraServerMessage) => void
 
@@ -191,6 +192,7 @@ export class CanastraRoom {
   }
 
   private finishRound(): void {
+    gameMetrics.canastra.matchesCompleted++
     const result = this.game.lastRoundResult!
     this.game.recordMatchWin(result.winnerTeam)
     const matchWins: Record<string, number> = {}

@@ -1,9 +1,49 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { z } from 'zod'
 import type { TournamentInfo } from '../../../shared/types'
 
 const SERVER = (import.meta as { env?: { VITE_SERVER_URL?: string } }).env?.VITE_SERVER_URL
   ?? 'http://localhost:3001'
+
+// ── Metrics ──────────────────────────────────────────────────────────────────
+// Admin-only REST payload, not part of the WS protocol — mirrors the shape
+// returned by getAdminMetrics() in server/src/index.ts. Kept local rather
+// than in shared/types.ts, matching how TournamentData (the other
+// admin-specific payload) is defined server-side only.
+
+type GameKey = 'poker' | 'truco' | 'gaucho' | 'canastra' | 'blackjack' | 'pushyourluckdraw'
+
+interface GameMetrics {
+  activeTables: number
+  activePlayers: number
+  handsCompleted?: number
+  roundsCompleted?: number
+  matchesCompleted?: number
+}
+
+interface AdminMetrics {
+  uptimeSeconds: number
+  openConnections: number
+  games: Record<GameKey, GameMetrics>
+}
+
+const GAME_LABELS: Record<GameKey, string> = {
+  poker: '♠ Poker',
+  truco: '🂡 Truco',
+  gaucho: '🧉 Truco Gaúcho',
+  canastra: '🎴 Canastra',
+  blackjack: '🂡 Blackjack',
+  pushyourluckdraw: '🍀 Push Your Luck',
+}
+
+function formatUptime(totalSeconds: number): string {
+  const h = Math.floor(totalSeconds / 3600)
+  const m = Math.floor((totalSeconds % 3600) / 60)
+  const s = totalSeconds % 60
+  if (h > 0) return `${h}h ${m}m`
+  if (m > 0) return `${m}m ${s}s`
+  return `${s}s`
+}
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 
@@ -68,6 +108,7 @@ export function AdminPage() {
   )
   const [tournament, setTournament] = useState<TournamentInfo | null>(null)
   const [loading, setLoading]       = useState(false)
+  const [activeAdminTab, setActiveAdminTab] = useState<'tournament' | 'metrics'>('tournament')
 
   // ── Login ──────────────────────────────────────────────────────────────────
 
@@ -106,6 +147,29 @@ export function AdminPage() {
       setTournament((data.tournament as TournamentInfo) ?? null)
     } catch { /* ignore */ }
   }
+
+  // ── Metrics ────────────────────────────────────────────────────────────────
+
+  const [metrics, setMetrics]           = useState<AdminMetrics | null>(null)
+  const [metricsError, setMetricsError] = useState('')
+
+  const loadMetrics = useCallback(async (token: string) => {
+    try {
+      const data = await apiGet('/api/admin/metrics', token)
+      if (data.error) { setMetricsError(data.error as string); return }
+      setMetrics(data as unknown as AdminMetrics)
+      setMetricsError('')
+    } catch { setMetricsError('Erro de conexão.') }
+  }, [])
+
+  // Poll every 5s, but only while the tab is actually open — no point
+  // hammering the endpoint (or holding a timer) for a panel nobody's looking at.
+  useEffect(() => {
+    if (activeAdminTab !== 'metrics' || !adminToken) return
+    loadMetrics(adminToken)
+    const id = setInterval(() => loadMetrics(adminToken), 5000)
+    return () => clearInterval(id)
+  }, [activeAdminTab, adminToken, loadMetrics])
 
   // ── Create tournament ──────────────────────────────────────────────────────
 
@@ -209,10 +273,22 @@ export function AdminPage() {
     <div className="admin-wrap">
       <div className="admin-card">
         <div className="admin-header">
-          <h1 className="admin-title">♠ Admin — Poker</h1>
+          <h1 className="admin-title">♠ Admin</h1>
           <button type="button" className="admin-btn ghost" onClick={handleLogout}>Sair</button>
         </div>
 
+        <div className="tabs admin-tabs">
+          <button type="button" className={`tab${activeAdminTab === 'tournament' ? ' active' : ''}`}
+            onClick={() => setActiveAdminTab('tournament')}>🏆 Torneio</button>
+          <button type="button" className={`tab${activeAdminTab === 'metrics' ? ' active' : ''}`}
+            onClick={() => setActiveAdminTab('metrics')}>📊 Métricas</button>
+        </div>
+
+        {activeAdminTab === 'metrics' && (
+          <MetricsPanel metrics={metrics} error={metricsError} />
+        )}
+
+        {activeAdminTab === 'tournament' && <>
         {/* Current tournament status */}
         {tournament && (
           <div className="admin-section">
@@ -281,6 +357,7 @@ export function AdminPage() {
             </form>
           </div>
         )}
+        </>}
       </div>
     </div>
   )
@@ -318,6 +395,56 @@ function TournamentStatus({ t }: { t: TournamentInfo }) {
       {t.status !== 'registering' && (
         <div className="ati-row"><span>Ativos</span><strong>{t.activeCount}</strong></div>
       )}
+    </div>
+  )
+}
+
+function MetricsPanel({ metrics, error }: { metrics: AdminMetrics | null; error: string }) {
+  if (error) return <div className="admin-section"><p className="admin-msg err">{error}</p></div>
+  if (!metrics) return <div className="admin-section"><p className="hint">Carregando…</p></div>
+
+  const totalTables  = Object.values(metrics.games).reduce((sum, g) => sum + g.activeTables, 0)
+  const totalPlayers = Object.values(metrics.games).reduce((sum, g) => sum + g.activePlayers, 0)
+
+  return (
+    <div className="admin-section">
+      <div className="metrics-overview">
+        <div className="metrics-stat"><span>Uptime</span><strong>{formatUptime(metrics.uptimeSeconds)}</strong></div>
+        <div className="metrics-stat"><span>Conexões abertas</span><strong>{metrics.openConnections}</strong></div>
+        <div className="metrics-stat"><span>Mesas ativas</span><strong>{totalTables}</strong></div>
+        <div className="metrics-stat"><span>Jogadores ativos</span><strong>{totalPlayers}</strong></div>
+      </div>
+
+      <div className="metrics-table-wrap">
+        <table className="metrics-table">
+          <thead>
+            <tr>
+              <th>Jogo</th>
+              <th>Mesas</th>
+              <th>Jogadores</th>
+              <th>Mãos</th>
+              <th>Partidas</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(Object.keys(GAME_LABELS) as GameKey[]).map((key) => {
+              const g = metrics.games[key]
+              return (
+                <tr key={key}>
+                  <td>{GAME_LABELS[key]}</td>
+                  <td>{g.activeTables}</td>
+                  <td>{g.activePlayers}</td>
+                  <td>{g.handsCompleted ?? g.roundsCompleted ?? '—'}</td>
+                  <td>{g.matchesCompleted ?? '—'}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="hint metrics-note">
+        Contadores de mãos/partidas são desde o último restart do servidor — sem persistência (ver .claude/Server.md). Atualiza a cada 5s.
+      </p>
     </div>
   )
 }
